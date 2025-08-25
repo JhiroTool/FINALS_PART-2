@@ -227,3 +227,13 @@ input[type="text"]:focus, input[type="password"]:focus {
     0% { transform: scale(0.7); opacity: 0; }
     100% { transform: scale(1); opacity: 1; }
 }
+
+@media (max-width: 767.98px) {
+    .card {
+        border-radius: 1rem !important;
+    }
+    .border-end {
+        border-right: none !important;
+        border-bottom: 1px solid #e9ecef !important;
+    }
+}
