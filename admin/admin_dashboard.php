@@ -1,3 +1,11 @@
+<?php
+session_start();
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 0) {
+    header("Location: ../login.php");
+    exit();
+}
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,8 +27,9 @@
         <div class="dash-actions">
             <a href="#" class="dash-btn">Manage Users</a>
             <a href="#" class="dash-btn">View Analytics</a>
+            <a href="approve_technicians.php" class="dash-btn">Approve Technicians</a>
         </div>
-        <a href="../login.php" class="logout-btn">Logout</a>
+        <a href="../logout.php" class="logout-btn">Logout</a>
         <footer class="dash-footer">&copy; 2025 PinoyFix. All rights reserved.</footer>
     </div>
 </body>

@@ -1,0 +1,45 @@
+body {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);
+    font-family: 'Poppins', sans-serif;
+}
+.tech-card {
+    background: rgba(255,255,255,0.97);
+    border-radius: 1.5rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    padding: 2rem 1.5rem;
+    max-width: 400px;
+    margin: auto;
+}
+.tech-logo {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: #e3f2fd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1rem auto;
+    box-shadow: 0 2px 12px rgba(33,150,243,0.15);
+}
+.tech-logo img {
+    width: 60px;
+    height: 60px;
+}
+.upload-status {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+}
+.upload-status .badge {
+    font-size: 1rem;
+}
+.btn-link {
+    color: #185a9d;
+    text-decoration: underline;
+}
+@media (max-width: 576px) {
+    .tech-card {
+        padding: 1rem 0.5rem;
+        border-radius: 1rem;
+    }
+}
