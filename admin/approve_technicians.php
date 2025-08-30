@@ -2,86 +2,266 @@
 session_start();
 include '../connection.php';
 
-// Only allow logged-in admins
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 0) {
+// Check if user is admin
+if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'admin') {
     header("Location: ../login.php");
     exit();
 }
 
-// Handle approve/reject actions
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tech_id'], $_POST['action'])) {
-    $tech_id = intval($_POST['tech_id']);
-    $action = $_POST['action'] === 'approve' ? 'approved' : 'rejected';
-    $stmt = $conn->prepare("UPDATE users SET cert_status=? WHERE id=?");
-    $stmt->bind_param("si", $action, $tech_id);
-    $stmt->execute();
-    $stmt->close();
+$message = '';
+$messageType = '';
+
+// Handle approval/rejection
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $technician_id = $_POST['technician_id'];
+    $action = $_POST['action'];
+    
+    if ($action == 'approve') {
+        $stmt = $conn->prepare("UPDATE technician SET Status = 'approved' WHERE Technician_ID = ?");
+        $stmt->bind_param("i", $technician_id);
+        if ($stmt->execute()) {
+            $message = "Technician approved successfully!";
+            $messageType = "success";
+        } else {
+            $message = "Error approving technician.";
+            $messageType = "error";
+        }
+        $stmt->close();
+    } elseif ($action == 'reject') {
+        $stmt = $conn->prepare("UPDATE technician SET Status = 'rejected' WHERE Technician_ID = ?");
+        $stmt->bind_param("i", $technician_id);
+        if ($stmt->execute()) {
+            $message = "Technician rejected.";
+            $messageType = "success";
+        } else {
+            $message = "Error rejecting technician.";
+            $messageType = "error";
+        }
+        $stmt->close();
+    }
 }
 
-// Fetch technicians with pending certificates
-$stmt = $conn->prepare("SELECT id, firstname, lastname, certificate FROM users WHERE role=1 AND cert_status='pending'");
-$stmt->execute();
-$result = $stmt->get_result();
-$technicians = $result->fetch_all(MYSQLI_ASSOC);
-$stmt->close();
+// Get pending technicians
+$pending_query = "SELECT t.*, a.Street, a.Barangay, a.City, a.Province 
+                  FROM technician t 
+                  LEFT JOIN technician_address ta ON t.Technician_ID = ta.Technician_ID 
+                  LEFT JOIN address a ON ta.Address_ID = a.Address_ID 
+                  WHERE t.Status = 'pending' 
+                  ORDER BY t.Technician_ID DESC";
+$pending_result = $conn->query($pending_query);
+
+// Get approved technicians
+$approved_query = "SELECT t.*, a.Street, a.Barangay, a.City, a.Province 
+                   FROM technician t 
+                   LEFT JOIN technician_address ta ON t.Technician_ID = ta.Technician_ID 
+                   LEFT JOIN address a ON ta.Address_ID = a.Address_ID 
+                   WHERE t.Status = 'approved' 
+                   ORDER BY t.Technician_ID DESC";
+$approved_result = $conn->query($approved_query);
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Approve Technicians</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="../css/dashboard.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Approve Technicians - PinoyFix Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/admin_approve.css">
 </head>
-<body class="dashboard-body admin-bg">
-    <div class="container py-5">
-        <div class="card mx-auto" style="max-width:700px;">
-            <div class="card-body">
-                <h3 class="mb-4 text-center">Approve Technician Certificates</h3>
-                <?php if (count($technicians) > 0): ?>
-                    <table class="table table-bordered table-hover align-middle">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Certificate</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <?php foreach ($technicians as $tech): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($tech['firstname'] . ' ' . $tech['lastname']); ?></td>
-                                <td>
-                                    <?php
-                                    $ext = strtolower(pathinfo($tech['certificate'], PATHINFO_EXTENSION));
-                                    if (in_array($ext, ['jpg', 'jpeg', 'png'])) {
-                                        echo '<img src="../uploads/certificates/' . htmlspecialchars($tech['certificate']) . '" alt="Certificate" style="max-width:120px;max-height:120px;border-radius:8px;">';
-                                    } elseif ($ext === 'pdf') {
-                                        echo '<a href="../uploads/certificates/' . htmlspecialchars($tech['certificate']) . '" target="_blank" class="btn btn-outline-secondary btn-sm">View PDF</a>';
-                                    } else {
-                                        echo 'No certificate file';
-                                    }
-                                    ?>
-                                </td>
-                                <td>
-                                    <form method="POST" class="d-flex gap-2">
-                                        <input type="hidden" name="tech_id" value="<?php echo $tech['id']; ?>">
-                                        <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">Approve</button>
-                                        <button type="submit" name="action" value="reject" class="btn btn-danger btn-sm">Reject</button>
-                                    </form>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php else: ?>
-                    <div class="alert alert-info text-center">No pending technician certificates.</div>
-                <?php endif; ?>
-                <div class="mt-3 text-center">
-                    <a href="admin_dashboard.php" class="btn btn-link">Back to Dashboard</a>
+<body>
+    <div class="admin-container">
+        <!-- Header -->
+        <header class="admin-header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <div class="logo-circle">
+                        <img src="../images/pinoyfix.png" alt="PinoyFix Logo" class="logo-img">
+                    </div>
+                    <div>
+                        <h1 class="brand-title">PinoyFix Admin</h1>
+                        <p class="subtitle">Technician Management</p>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <a href="admin_dashboard.php" class="btn-secondary">
+                        ← Back to Dashboard
+                    </a>
+                    <a href="../logout.php" class="btn-logout">Logout</a>
                 </div>
             </div>
-        </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Messages -->
+            <?php if ($message): ?>
+                <div class="alert alert-<?php echo $messageType; ?>">
+                    <?php echo $message; ?>
+                </div>
+            <?php endif; ?>
+
+            <!-- Pending Technicians Section -->
+            <section class="section">
+                <div class="section-header">
+                    <h2 class="section-title">
+                        <span class="section-icon">⏳</span>
+                        Pending Technician Applications
+                    </h2>
+                    <div class="badge badge-warning">
+                        <?php echo $pending_result->num_rows; ?> pending
+                    </div>
+                </div>
+
+                <?php if ($pending_result->num_rows > 0): ?>
+                    <div class="technicians-grid">
+                        <?php while ($tech = $pending_result->fetch_assoc()): ?>
+                            <div class="technician-card pending">
+                                <div class="card-header">
+                                    <div class="tech-avatar">
+                                        <span><?php echo strtoupper(substr($tech['Technician_FN'], 0, 1) . substr($tech['Technician_LN'], 0, 1)); ?></span>
+                                    </div>
+                                    <div class="tech-info">
+                                        <h3><?php echo htmlspecialchars($tech['Technician_FN'] . ' ' . $tech['Technician_LN']); ?></h3>
+                                        <p class="tech-email"><?php echo htmlspecialchars($tech['Technician_Email']); ?></p>
+                                        <p class="tech-phone"><?php echo htmlspecialchars($tech['Technician_Phone']); ?></p>
+                                    </div>
+                                    <div class="status-badge status-pending">Pending</div>
+                                </div>
+
+                                <div class="card-body">
+                                    <div class="info-row">
+                                        <span class="label">Specialization:</span>
+                                        <span class="value"><?php echo htmlspecialchars($tech['Specialization'] ?: 'Not specified'); ?></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label">Service Rate:</span>
+                                        <span class="value">₱<?php echo number_format($tech['Service_Pricing'] ?: 0); ?>/hour</span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label">Service Area:</span>
+                                        <span class="value"><?php echo htmlspecialchars($tech['Service_Location'] ?: 'Not specified'); ?></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label">Address:</span>
+                                        <span class="value">
+                                            <?php 
+                                            $address_parts = array_filter([
+                                                $tech['Street'], 
+                                                $tech['Barangay'], 
+                                                $tech['City'], 
+                                                $tech['Province']
+                                            ]);
+                                            echo htmlspecialchars(implode(', ', $address_parts) ?: 'Not provided');
+                                            ?>
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="card-actions">
+                                    <form method="POST" style="display: inline;">
+                                        <input type="hidden" name="technician_id" value="<?php echo $tech['Technician_ID']; ?>">
+                                        <input type="hidden" name="action" value="approve">
+                                        <button type="submit" class="btn-approve" onclick="return confirm('Are you sure you want to approve this technician?')">
+                                            ✓ Approve
+                                        </button>
+                                    </form>
+                                    <form method="POST" style="display: inline;">
+                                        <input type="hidden" name="technician_id" value="<?php echo $tech['Technician_ID']; ?>">
+                                        <input type="hidden" name="action" value="reject">
+                                        <button type="submit" class="btn-reject" onclick="return confirm('Are you sure you want to reject this technician?')">
+                                            ✗ Reject
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        <?php endwhile; ?>
+                    </div>
+                <?php else: ?>
+                    <div class="empty-state">
+                        <div class="empty-icon">📝</div>
+                        <h3>No Pending Applications</h3>
+                        <p>All technician applications have been reviewed.</p>
+                    </div>
+                <?php endif; ?>
+            </section>
+
+            <!-- Approved Technicians Section -->
+            <section class="section">
+                <div class="section-header">
+                    <h2 class="section-title">
+                        <span class="section-icon">✅</span>
+                        Approved Technicians
+                    </h2>
+                    <div class="badge badge-success">
+                        <?php echo $approved_result->num_rows; ?> approved
+                    </div>
+                </div>
+
+                <?php if ($approved_result->num_rows > 0): ?>
+                    <div class="technicians-grid">
+                        <?php while ($tech = $approved_result->fetch_assoc()): ?>
+                            <div class="technician-card approved">
+                                <div class="card-header">
+                                    <div class="tech-avatar approved-avatar">
+                                        <span><?php echo strtoupper(substr($tech['Technician_FN'], 0, 1) . substr($tech['Technician_LN'], 0, 1)); ?></span>
+                                    </div>
+                                    <div class="tech-info">
+                                        <h3><?php echo htmlspecialchars($tech['Technician_FN'] . ' ' . $tech['Technician_LN']); ?></h3>
+                                        <p class="tech-email"><?php echo htmlspecialchars($tech['Technician_Email']); ?></p>
+                                        <p class="tech-phone"><?php echo htmlspecialchars($tech['Technician_Phone']); ?></p>
+                                    </div>
+                                    <div class="status-badge status-approved">✓ Approved</div>
+                                </div>
+
+                                <div class="card-body">
+                                    <div class="info-row">
+                                        <span class="label">Specialization:</span>
+                                        <span class="value"><?php echo htmlspecialchars($tech['Specialization']); ?></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label">Rating:</span>
+                                        <span class="value">⭐ <?php echo number_format($tech['Ratings'], 1); ?></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label">Service Rate:</span>
+                                        <span class="value">₱<?php echo number_format($tech['Service_Pricing']); ?>/hour</span>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endwhile; ?>
+                    </div>
+                <?php else: ?>
+                    <div class="empty-state">
+                        <div class="empty-icon">👥</div>
+                        <h3>No Approved Technicians</h3>
+                        <p>No technicians have been approved yet.</p>
+                    </div>
+                <?php endif; ?>
+            </section>
+        </main>
     </div>
+
+    <script>
+        // Auto-hide alerts after 5 seconds
+        setTimeout(function() {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(alert => {
+                alert.style.opacity = '0';
+                alert.style.transform = 'translateY(-20px)';
+                setTimeout(() => alert.remove(), 300);
+            });
+        }, 5000);
+
+        // Smooth scroll to sections
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+    </script>
 </body>
 </html>
