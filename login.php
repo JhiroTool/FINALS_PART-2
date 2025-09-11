@@ -610,8 +610,8 @@ input:focus, select:focus {
                         <span class="section-icon">⚡</span>
                         Quick Access
                     </h3>
-                    
-                    <div class="quick-buttons">
+
+                    <div class="quick-buttons" onclick="window.location.href='guest_view.php'">
                         <div class="quick-button">
                             <div class="quick-icon client-icon">👥</div>
                             <h4>Customer Login</h4>

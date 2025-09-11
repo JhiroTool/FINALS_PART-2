@@ -6,6 +6,7 @@
   --royal-blue: #4169E1; /* Royal blue */
   --bg: #f8fafc;
   --card: #ffffff;
+  --card-bg: #ffffff;
   --muted: #64748b;
   --text: #1e293b;
   --border: #e2e8f0;
@@ -227,6 +228,45 @@ p.lead {
   transform: translateY(-4px);
   box-shadow: var(--shadow-lg);
   border-color: var(--blue);
+}
+
+/* Testimonial Card */
+.testimonial-card {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.testimonial-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.testimonial-card .rating {
+  font-size: 14px;
+  margin-bottom: 12px;
+  color: #fbbf24;
+}
+
+.testimonial-card p {
+  font-style: italic;
+  line-height: 1.5;
+  margin: 0 0 16px;
+  color: var(--text);
+}
+
+.testimonial-card .client-info {
+  font-size: 13px;
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding-top: 12px;
+}
+
+.testimonial-card .client-info strong {
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* Icon Styles */

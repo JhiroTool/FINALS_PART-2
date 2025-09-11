@@ -147,6 +147,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact'])) {
       </ol>
     </section>
 
+    <section id="testimonials" style="margin-top:34px">
+      <h2 style="margin:0 0 8px">What our community says</h2>
+      <p style="color:var(--muted);margin:0 0 18px">Real reviews from Filipino families who found reliable fixers through PinoyFix.</p>
+      
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
+        <div class="testimonial-card">
+          <div class="rating">⭐⭐⭐⭐⭐</div>
+          <p>"Kuya Mark fixed our aircon in 2 hours! Very professional and hindi mahal. Highly recommended!"</p>
+          <div class="client-info">
+            <strong>Maria S.</strong> • Quezon City
+            <div style="font-size:12px;color:var(--muted)">Aircon Repair • ₱800</div>
+          </div>
+        </div>
+        
+        <div class="testimonial-card">
+          <div class="rating">⭐⭐⭐⭐⭐</div>
+          <p>"Same-day washing machine repair! Ate Joy was very kind and explained everything clearly. Salamat!"</p>
+          <div class="client-info">
+            <strong>Roberto L.</strong> • Makati
+            <div style="font-size:12px;color:var(--muted)">Appliance Repair • ₱1,200</div>
+          </div>
+        </div>
+        
+        <div class="testimonial-card">
+          <div class="rating">⭐⭐⭐⭐⭐</div>
+          <p>"Fixed my laptop screen perfectly. Very transparent sa pricing and guaranteed ang work niya for 6 months."</p>
+          <div class="client-info">
+            <strong>Jenny C.</strong> • Cebu City
+            <div style="font-size:12px;color:var(--muted)">Gadget Repair • ₱2,500</div>
+          </div>
+        </div>
+        
+        <div class="testimonial-card">
+          <div class="rating">⭐⭐⭐⭐⭐</div>
+          <p>"Electrical wiring sa kitchen. Si Manong Rico very experienced and safety-first talaga. Worth it!"</p>
+          <div class="client-info">
+            <strong>Carlos M.</strong> • Davao
+            <div style="font-size:12px;color:var(--muted)">Electrical Work • ₱3,800</div>
+          </div>
+        </div>
+        
+        <div class="testimonial-card">
+          <div class="rating">⭐⭐⭐⭐⭐</div>
+          <p>"Plumbing emergency solved agad! Ate Linda came within 30 minutes. Professional and mabait pa."</p>
+          <div class="client-info">
+            <strong>Anna T.</strong> • Pasig
+            <div style="font-size:12px;color:var(--muted)">Plumbing • ₱1,500</div>
+          </div>
+        </div>
+        
+        <div class="testimonial-card">
+          <div class="rating">⭐⭐⭐⭐⭐</div>
+          <p>"Phone screen replacement done perfectly. Kuya Jun even cleaned the phone for free. Astig!"</p>
+          <div class="client-info">
+            <strong>Michael P.</strong> • Iloilo
+            <div style="font-size:12px;color:var(--muted)">Mobile Repair • ₱1,800</div>
+          </div>
+        </div>
+      </div>
+      
+      <div style="text-align:center;margin-top:20px">
+        <p style="color:var(--muted);margin-bottom:12px">Join thousands of satisfied customers</p>
+        <a class="btn btn-primary" href="login.php">Start your repair journey</a>
+      </div>
+    </section>
+
     <section id="become" style="margin-top:28px">
       <h2 style="margin:0 0 8px">Become a Fixer</h2>
       <p style="color:var(--muted);margin:0 0 12px">Sign up to grow your client base. Tools for schedules, invoicing, and reputation management included.</p>
