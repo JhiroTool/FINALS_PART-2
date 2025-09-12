@@ -354,6 +354,10 @@ input:focus, select:focus {
     color: #1f2937;
 }
 
+.home-icon {
+    background: linear-gradient(135deg, #10b981, #059669);
+}
+
 .quick-button h4 {
     font-size: 14px;
     font-weight: 600;
@@ -618,13 +622,13 @@ input:focus, select:focus {
                             <p>Find trusted fixers for your appliances</p>
                         </div>
                         
-                        <div class="quick-button">
+                        <div class="quick-button" onclick="window.location.href='technician_view.php'">
                             <div class="quick-icon tech-icon">🔧</div>
                             <h4>Fixer Login</h4>
                             <p>Manage your repair services</p>
                         </div>
                         
-                        <div class="quick-button">
+                        <div class="quick-button" onclick="window.location.href='index.php'">
                             <div class="quick-icon home-icon">⚙️</div>
                             <h4>Home View</h4>
                             <p>Homepage Guest Access</p>
