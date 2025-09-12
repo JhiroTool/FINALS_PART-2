@@ -611,8 +611,8 @@ input:focus, select:focus {
                         Quick Access
                     </h3>
 
-                    <div class="quick-buttons" onclick="window.location.href='guest_view.php'">
-                        <div class="quick-button">
+                    <div class="quick-buttons">
+                        <div class="quick-button" onclick="window.location.href='guest_view.php'">
                             <div class="quick-icon client-icon">👥</div>
                             <h4>Customer Login</h4>
                             <p>Find trusted fixers for your appliances</p>
