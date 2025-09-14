@@ -130,7 +130,9 @@ try {
                         <div class="user-dropdown">
                             <button class="dropdown-btn">⚙️</button>
                             <div class="dropdown-menu">
+                                <a href="client_dashboard.php">🏠 Dashboard</a>
                                 <a href="update_profile.php">👤 Profile Settings</a>
+                                <a href="my_bookings.php">📋 My Bookings</a>
                                 <a href="billing.php">💳 Billing & Payment</a>
                                 <a href="support.php">🎧 Support Center</a>
                                 <hr>
@@ -305,6 +307,24 @@ try {
                             </div>
                         </div>
                         <a href="support.php" class="action-btn">Contact</a>
+                    </div>
+
+                    <div class="action-item">
+                        <div class="action-icon">💬</div>
+                        <div class="action-details">
+                            <h3>Messages</h3>
+                            <p>Chat with your technicians</p>
+                            <div class="action-meta">
+                                <?php
+                                // Get unread message count
+                                $unread_query = $conn->query("SELECT COUNT(*) as count FROM messages WHERE Receiver_ID = {$user_id} AND Receiver_Type = 'client' AND Is_Read = 0");
+                                $unread_count = $unread_query ? $unread_query->fetch_assoc()['count'] : 0;
+                                ?>
+                                <span><?php echo $unread_count; ?> unread</span>
+                                <span>💬 Real-time chat</span>
+                            </div>
+                        </div>
+                        <a href="messages.php" class="action-btn">Open Chat</a>
                     </div>
                 </div>
             </section>

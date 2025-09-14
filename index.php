@@ -21,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact'])) {
     <title>PinoyFix — Connect. Repair. Empower.</title>
     <meta name="description" content="PinoyFix: a community-driven platform connecting Filipinos with trusted local fixers for home, gadgets, and more." />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/test.css">
+    <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
     <!-- Modern Header -->
@@ -115,13 +115,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact'])) {
                             <span class="card-trend">Escrow protection</span>
                         </div>
                     </div>
-
-                    <div class="status-card rating">
+                    
+                    <div class="status-card appliances">
                         <div class="card-icon">🛡️</div>
                         <div class="card-content">
                             <h3>Service Guarantee</h3>
                             <p>30-Day Warranty</p>
-                            <span class="card-trend">Quality assured</span>
+                            <span class="card-trend">Quality assured/span>
                         </div>
                     </div>
                 </div>

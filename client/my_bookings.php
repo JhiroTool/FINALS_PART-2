@@ -85,11 +85,13 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                             <p>Premium Client</p>
                         </div>
                         <div class="user-dropdown">
-                            <button class="dropdown-btn" onclick="toggleDropdown()">⚙️</button>
-                            <div class="dropdown-menu" id="userDropdown">
+                            <button class="dropdown-btn">⚙️</button>
+                            <div class="dropdown-menu">
                                 <a href="client_dashboard.php">🏠 Dashboard</a>
-                                <a href="request_service.php">🔧 New Request</a>
+                                <a href="update_profile.php">👤 Profile Settings</a>
                                 <a href="my_bookings.php">📋 My Bookings</a>
+                                <a href="billing.php">💳 Billing & Payment</a>
+                                <a href="support.php">🎧 Support Center</a>
                                 <hr>
                                 <a href="../logout.php" class="logout-link">🚪 Logout</a>
                             </div>
