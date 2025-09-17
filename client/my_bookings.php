@@ -392,36 +392,63 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
     </footer>
 
     <script>
-        // Toggle dropdown menu
-        function toggleDropdown() {
-            const dropdown = document.getElementById('userDropdown');
-            dropdown.classList.toggle('show');
-        }
-
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const dropdown = document.getElementById('userDropdown');
+        // Fixed dropdown functionality
+        document.addEventListener('DOMContentLoaded', function() {
             const dropdownBtn = document.querySelector('.dropdown-btn');
+            const dropdownMenu = document.querySelector('.dropdown-menu');
             
-            if (!dropdown.contains(event.target) && !dropdownBtn.contains(event.target)) {
-                dropdown.classList.remove('show');
-            }
-        });
+            if (dropdownBtn && dropdownMenu) {
+                dropdownBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    dropdownMenu.classList.toggle('show');
+                });
 
-        // Search functionality
-        document.getElementById('bookingSearch').addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            const bookingCards = document.querySelectorAll('.action-item');
-            
-            bookingCards.forEach(card => {
-                const serviceType = card.querySelector('h3').textContent.toLowerCase();
-                const description = card.textContent.toLowerCase();
-                
-                if (serviceType.includes(searchTerm) || description.includes(searchTerm)) {
-                    card.style.display = 'block';
-                } else {
-                    card.style.display = 'none';
-                }
+                // Close dropdown when clicking outside
+                document.addEventListener('click', function(e) {
+                    if (!dropdownBtn.contains(e.target) && !dropdownMenu.contains(e.target)) {
+                        dropdownMenu.classList.remove('show');
+                    }
+                });
+            }
+
+            // Search functionality
+            const searchInput = document.getElementById('bookingSearch');
+            if (searchInput) {
+                searchInput.addEventListener('input', function(e) {
+                    const searchTerm = e.target.value.toLowerCase();
+                    const bookingCards = document.querySelectorAll('.action-item');
+                    
+                    bookingCards.forEach(card => {
+                        const serviceType = card.querySelector('h3').textContent.toLowerCase();
+                        const description = card.textContent.toLowerCase();
+                        
+                        if (serviceType.includes(searchTerm) || description.includes(searchTerm)) {
+                            card.style.display = 'block';
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+                });
+            }
+
+            // Animate cards on load
+            const actionItems = document.querySelectorAll('.action-item');
+            actionItems.forEach((item, index) => {
+                item.style.opacity = '0';
+                item.style.transform = 'translateY(30px)';
+                setTimeout(() => {
+                    item.style.opacity = '1';
+                    item.style.transform = 'translateY(0)';
+                    item.style.transition = 'all 0.6s ease';
+                }, index * 100);
+            });
+
+            // Phone link notifications
+            const phoneLinks = document.querySelectorAll('a[href^="tel:"]');
+            phoneLinks.forEach(link => {
+                link.addEventListener('click', function() {
+                    showNotification('📞 Opening your phone app to call the technician...', 'info');
+                });
             });
         });
 
@@ -493,12 +520,17 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
         }
 
         function showNotification(message, type = 'info') {
+            // Remove existing notifications
+            const existingNotifications = document.querySelectorAll('.custom-notification');
+            existingNotifications.forEach(notif => notif.remove());
+
             const notification = document.createElement('div');
+            notification.className = 'custom-notification';
             notification.textContent = message;
             
             Object.assign(notification.style, {
                 position: 'fixed',
-                top: '20px',
+                top: '100px',
                 right: '20px',
                 padding: '16px 24px',
                 borderRadius: '12px',
@@ -507,8 +539,8 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                 zIndex: '9999',
                 maxWidth: '400px',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-                transform: 'translateX(400px)',
-                transition: 'all 0.3s ease',
+                transform: 'translateX(450px)',
+                transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
                 cursor: 'pointer'
             });
 
@@ -522,40 +554,21 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
             notification.style.background = colors[type] || colors.info;
             document.body.appendChild(notification);
             
+            // Slide in
             setTimeout(() => notification.style.transform = 'translateX(0)', 100);
             
+            // Auto remove after 5 seconds
             setTimeout(() => {
-                notification.style.transform = 'translateX(400px)';
-                setTimeout(() => notification.remove(), 300);
+                notification.style.transform = 'translateX(450px)';
+                setTimeout(() => notification.remove(), 400);
             }, 5000);
 
+            // Click to dismiss
             notification.addEventListener('click', () => {
-                notification.style.transform = 'translateX(400px)';
-                setTimeout(() => notification.remove(), 300);
+                notification.style.transform = 'translateX(450px)';
+                setTimeout(() => notification.remove(), 400);
             });
         }
-
-        // Add phone call notifications
-        document.addEventListener('DOMContentLoaded', function() {
-            const phoneLinks = document.querySelectorAll('a[href^="tel:"]');
-            phoneLinks.forEach(link => {
-                link.addEventListener('click', function() {
-                    showNotification('📞 Opening your phone app to call the technician...', 'info');
-                });
-            });
-
-            // Animate cards on load
-            const actionItems = document.querySelectorAll('.action-item');
-            actionItems.forEach((item, index) => {
-                item.style.opacity = '0';
-                item.style.transform = 'translateY(30px)';
-                setTimeout(() => {
-                    item.style.opacity = '1';
-                    item.style.transform = 'translateY(0)';
-                    item.style.transition = 'all 0.6s ease';
-                }, index * 100);
-            });
-        });
     </script>
 </body>
 </html>

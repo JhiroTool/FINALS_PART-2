@@ -18,14 +18,29 @@ $result = $stmt->get_result();
 $client = $result->fetch_assoc();
 $stmt->close();
 
+// Initialize variables with default values
+$pending_requests = 0;
+$accepted_bookings = 0;
+$completed_bookings = 0;
+$appliances_count = 0;
+$recent_bookings = null;
+$available_techs = null;
+
 // Get client statistics
 try {
-    // Count active bookings
-    $active_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status IN ('pending', 'in-progress')");
-    $active_stmt->bind_param("i", $user_id);
-    $active_stmt->execute();
-    $active_bookings = $active_stmt->get_result()->fetch_assoc()['count'];
-    $active_stmt->close();
+    // Count pending service requests (waiting for technician to accept)
+    $pending_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status = 'pending'");
+    $pending_stmt->bind_param("i", $user_id);
+    $pending_stmt->execute();
+    $pending_requests = $pending_stmt->get_result()->fetch_assoc()['count'];
+    $pending_stmt->close();
+
+    // Count accepted/in-progress bookings
+    $accepted_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status IN ('accepted', 'in-progress')");
+    $accepted_stmt->bind_param("i", $user_id);
+    $accepted_stmt->execute();
+    $accepted_bookings = $accepted_stmt->get_result()->fetch_assoc()['count'];
+    $accepted_stmt->close();
 
     // Count completed bookings
     $completed_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status = 'completed'");
@@ -41,13 +56,13 @@ try {
     $appliances_count = $appliances_stmt->get_result()->fetch_assoc()['count'];
     $appliances_stmt->close();
 
-    // Get recent bookings
+    // Get recent bookings with status information
     $recent_stmt = $conn->prepare("
-        SELECT b.*, t.Technician_FN, t.Technician_LN 
+        SELECT b.*, t.Technician_FN, t.Technician_LN, t.Technician_Phone 
         FROM booking b 
         LEFT JOIN technician t ON b.Technician_ID = t.Technician_ID 
         WHERE b.Client_ID = ? 
-        ORDER BY b.AptDate DESC 
+        ORDER BY b.Created_At DESC 
         LIMIT 5
     ");
     $recent_stmt->bind_param("i", $user_id);
@@ -55,25 +70,23 @@ try {
     $recent_bookings = $recent_stmt->get_result();
     $recent_stmt->close();
 
-    // Get available technicians for recommendations
+    // Get available technicians (for display purposes only - not for booking)
     $techs_stmt = $conn->prepare("
         SELECT t.*, 
-               (SELECT COUNT(*) FROM booking WHERE Technician_ID = t.Technician_ID AND Status = 'completed') as completed_jobs,
-               (SELECT AVG(Rating) FROM booking WHERE Technician_ID = t.Technician_ID AND Rating > 0) as avg_rating
+               COALESCE((SELECT COUNT(*) FROM booking WHERE Technician_ID = t.Technician_ID AND Status = 'completed'), 0) as completed_jobs,
+               COALESCE((SELECT AVG(Rating) FROM booking WHERE Technician_ID = t.Technician_ID AND Rating > 0), 4.5) as avg_rating
         FROM technician t 
-        WHERE t.Status = 'available' 
+        WHERE t.Status = 'approved' 
         ORDER BY completed_jobs DESC, avg_rating DESC
         LIMIT 6
     ");
     $techs_stmt->execute();
-    $recommended_techs = $techs_stmt->get_result();
+    $available_techs = $techs_stmt->get_result();
     $techs_stmt->close();
 
 } catch (Exception $e) {
-    $active_bookings = 0;
-    $completed_bookings = 0;
-    $appliances_count = 0;
-    $recent_bookings = null;
+    // Variables are already initialized above
+    error_log("Dashboard error: " . $e->getMessage());
 }
 ?>
 
@@ -82,7 +95,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo $client['Client_FN']; ?>'s Dashboard - PinoyFix</title>
+    <title><?php echo htmlspecialchars($client['Client_FN']); ?>'s Dashboard - PinoyFix</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../css/client-dashboard-modern.css">
 </head>
@@ -105,7 +118,7 @@ try {
                 <!-- Search Bar -->
                 <div class="search-section">
                     <div class="search-container">
-                        <input type="text" placeholder="Search services, technicians, or booking history..." class="search-input">
+                        <input type="text" placeholder="Search services, booking history..." class="search-input">
                         <button class="search-btn">🔍</button>
                     </div>
                 </div>
@@ -114,8 +127,8 @@ try {
                 <div class="user-section">
                     <div class="notification-bell">
                         <span class="bell-icon">🔔</span>
-                        <?php if ($active_bookings > 0): ?>
-                        <span class="notification-badge"><?php echo $active_bookings; ?></span>
+                        <?php if (($pending_requests + $accepted_bookings) > 0): ?>
+                        <span class="notification-badge"><?php echo ($pending_requests + $accepted_bookings); ?></span>
                         <?php endif; ?>
                     </div>
                     
@@ -133,6 +146,8 @@ try {
                                 <a href="client_dashboard.php">🏠 Dashboard</a>
                                 <a href="update_profile.php">👤 Profile Settings</a>
                                 <a href="my_bookings.php">📋 My Bookings</a>
+                                <a href="messages.php">💬 Messages</a>
+                                <a href="my_appliances.php">📱 My Appliances</a>
                                 <a href="billing.php">💳 Billing & Payment</a>
                                 <a href="support.php">🎧 Support Center</a>
                                 <hr>
@@ -152,44 +167,53 @@ try {
                 <div class="hero-content">
                     <div class="welcome-text">
                         <h1>Welcome back, <?php echo htmlspecialchars($client['Client_FN']); ?>! 🎉</h1>
-                        <p>Your personal repair hub - manage services, track progress, and connect with top-rated fixers.</p>
+                        <p>Your personal repair hub - request services and let skilled technicians come to you.</p>
                     </div>
                     
                     <div class="hero-stats">
                         <div class="hero-stat">
-                            <div class="stat-number"><?php echo $active_bookings; ?></div>
+                            <div class="stat-number"><?php echo $pending_requests; ?></div>
+                            <div class="stat-label">Pending Requests</div>
+                        </div>
+                        <div class="hero-stat">
+                            <div class="stat-number"><?php echo $accepted_bookings; ?></div>
                             <div class="stat-label">Active Services</div>
                         </div>
                         <div class="hero-stat">
                             <div class="stat-number"><?php echo $completed_bookings; ?></div>
                             <div class="stat-label">Completed</div>
                         </div>
-                        <div class="hero-stat">
-                            <div class="stat-number"><?php echo $appliances_count; ?></div>
-                            <div class="stat-label">Appliances</div>
-                        </div>
                     </div>
 
                     <div class="hero-actions">
                         <a href="request_service.php" class="hero-btn primary">
-                            <span class="btn-icon">🔧</span>
+                            <span class="btn-icon">📝</span>
                             <span>Request New Service</span>
                         </a>
-                        <a href="../marketplace.php" class="hero-btn secondary">
-                            <span class="btn-icon">🛍️</span>
-                            <span>Browse Marketplace</span>
+                        <a href="my_bookings.php" class="hero-btn secondary">
+                            <span class="btn-icon">📋</span>
+                            <span>Track My Requests</span>
                         </a>
                     </div>
                 </div>
                 
                 <!-- Status Cards -->
                 <div class="status-cards">
+                    <div class="status-card pending">
+                        <div class="card-icon">⏳</div>
+                        <div class="card-content">
+                            <h3><?php echo $pending_requests; ?></h3>
+                            <p>Pending Requests</p>
+                            <span class="card-trend">Waiting for technician</span>
+                        </div>
+                    </div>
+                    
                     <div class="status-card active">
                         <div class="card-icon">🔧</div>
                         <div class="card-content">
-                            <h3><?php echo $active_bookings; ?></h3>
+                            <h3><?php echo $accepted_bookings; ?></h3>
                             <p>Active Services</p>
-                            <span class="card-trend">Currently being worked on</span>
+                            <span class="card-trend">Being worked on</span>
                         </div>
                     </div>
                     
@@ -201,28 +225,62 @@ try {
                             <span class="card-trend">Successfully finished</span>
                         </div>
                     </div>
-                    
+
                     <div class="status-card appliances">
                         <div class="card-icon">📱</div>
                         <div class="card-content">
                             <h3><?php echo $appliances_count; ?></h3>
-                            <p>Registered Appliances</p>
+                            <p>My Appliances</p>
                             <span class="card-trend">Under your care</span>
-                        </div>
-                    </div>
-
-                    <div class="status-card rating">
-                        <div class="card-icon">⭐</div>
-                        <div class="card-content">
-                            <h3>4.8</h3>
-                            <p>Your Average Rating</p>
-                            <span class="card-trend">Excellent client!</span>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Quick Actions Marketplace Style -->
+            <!-- How It Works Section -->
+            <section class="how-it-works">
+                <h2 class="section-title">
+                    <span class="title-icon">🔧</span>
+                    How PinoyFix Works
+                </h2>
+                <p class="section-subtitle">Simple process to get your appliances fixed</p>
+                
+                <div class="process-steps">
+                    <div class="process-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>📝 Request Service</h3>
+                            <p>Submit your repair request with details about your appliance and issue.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="process-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>🔍 Technicians Review</h3>
+                            <p>Qualified technicians in your area will review and bid on your request.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="process-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>✅ Get Matched</h3>
+                            <p>A technician accepts your request and contacts you to schedule service.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="process-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h3>🔧 Service Complete</h3>
+                            <p>Your appliance gets fixed, you pay, and rate the service experience.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Actions -->
             <section class="marketplace-actions">
                 <h2 class="section-title">
                     <span class="title-icon">⚡</span>
@@ -231,27 +289,27 @@ try {
                 
                 <div class="action-marketplace">
                     <div class="action-item featured">
-                        <div class="action-badge">Most Used</div>
-                        <div class="action-icon">🔧</div>
+                        <div class="action-badge">Start Here</div>
+                        <div class="action-icon">📝</div>
                         <div class="action-details">
                             <h3>Request Service</h3>
-                            <p>Book repair for any appliance</p>
+                            <p>Post your repair need and let technicians compete</p>
                             <div class="action-meta">
-                                <span>⚡ Quick booking</span>
-                                <span>📱 Instant quotes</span>
+                                <span>⚡ Quick posting</span>
+                                <span>📍 Local technicians</span>
                             </div>
                         </div>
-                        <a href="request_service.php" class="action-btn">Book Now</a>
+                        <a href="request_service.php" class="action-btn">Create Request</a>
                     </div>
 
                     <div class="action-item">
                         <div class="action-icon">📋</div>
                         <div class="action-details">
-                            <h3>My Bookings</h3>
-                            <p>Track all your service requests</p>
+                            <h3>My Service Requests</h3>
+                            <p>Track all your service requests and responses</p>
                             <div class="action-meta">
-                                <span><?php echo $active_bookings; ?> active</span>
-                                <span><?php echo $completed_bookings; ?> completed</span>
+                                <span><?php echo $pending_requests; ?> pending</span>
+                                <span><?php echo $accepted_bookings; ?> active</span>
                             </div>
                         </div>
                         <a href="my_bookings.php" class="action-btn">View All</a>
@@ -261,39 +319,48 @@ try {
                         <div class="action-icon">📱</div>
                         <div class="action-details">
                             <h3>My Appliances</h3>
-                            <p>Manage registered devices</p>
+                            <p>Manage your registered appliances and warranties</p>
                             <div class="action-meta">
                                 <span><?php echo $appliances_count; ?> registered</span>
-                                <span>🔒 Warranty tracked</span>
+                                <span>🔒 Warranty tracking</span>
                             </div>
                         </div>
                         <a href="my_appliances.php" class="action-btn">Manage</a>
                     </div>
 
                     <div class="action-item">
+                        <div class="action-icon">💬</div>
+                        <div class="action-details">
+                            <h3>Messages</h3>
+                            <p>Chat with technicians about your services</p>
+                            <div class="action-meta">
+                                <?php
+                                // Get unread message count safely
+                                try {
+                                    $unread_query = $conn->query("SELECT COUNT(*) as count FROM messages WHERE Receiver_ID = {$user_id} AND Receiver_Type = 'client' AND Is_Read = 0");
+                                    $unread_count = $unread_query ? $unread_query->fetch_assoc()['count'] : 0;
+                                } catch (Exception $e) {
+                                    $unread_count = 0;
+                                }
+                                ?>
+                                <span><?php echo $unread_count; ?> unread</span>
+                                <span>💬 Real-time chat</span>
+                            </div>
+                        </div>
+                        <a href="messages.php" class="action-btn">Open Chat</a>
+                    </div>
+
+                    <div class="action-item">
                         <div class="action-icon">👤</div>
                         <div class="action-details">
                             <h3>Profile Settings</h3>
-                            <p>Update your information</p>
+                            <p>Update your information and preferences</p>
                             <div class="action-meta">
                                 <span>📧 Contact info</span>
                                 <span>📍 Address</span>
                             </div>
                         </div>
                         <a href="update_profile.php" class="action-btn">Edit</a>
-                    </div>
-
-                    <div class="action-item">
-                        <div class="action-icon">💳</div>
-                        <div class="action-details">
-                            <h3>Payment & Billing</h3>
-                            <p>Manage payment methods</p>
-                            <div class="action-meta">
-                                <span>💰 Auto-pay</span>
-                                <span>📊 History</span>
-                            </div>
-                        </div>
-                        <a href="billing.php" class="action-btn">Manage</a>
                     </div>
 
                     <div class="action-item">
@@ -308,24 +375,6 @@ try {
                         </div>
                         <a href="support.php" class="action-btn">Contact</a>
                     </div>
-
-                    <div class="action-item">
-                        <div class="action-icon">💬</div>
-                        <div class="action-details">
-                            <h3>Messages</h3>
-                            <p>Chat with your technicians</p>
-                            <div class="action-meta">
-                                <?php
-                                // Get unread message count
-                                $unread_query = $conn->query("SELECT COUNT(*) as count FROM messages WHERE Receiver_ID = {$user_id} AND Receiver_Type = 'client' AND Is_Read = 0");
-                                $unread_count = $unread_query ? $unread_query->fetch_assoc()['count'] : 0;
-                                ?>
-                                <span><?php echo $unread_count; ?> unread</span>
-                                <span>💬 Real-time chat</span>
-                            </div>
-                        </div>
-                        <a href="messages.php" class="action-btn">Open Chat</a>
-                    </div>
                 </div>
             </section>
 
@@ -335,9 +384,9 @@ try {
                     <div>
                         <h2 class="section-title">
                             <span class="title-icon">📊</span>
-                            Recent Activity
+                            Recent Service Requests
                         </h2>
-                        <p class="section-subtitle">Your latest service requests and updates</p>
+                        <p class="section-subtitle">Your latest requests and their status</p>
                     </div>
                     <a href="my_bookings.php" class="view-all-link">View All →</a>
                 </div>
@@ -350,6 +399,7 @@ try {
                             <?php
                             switch($booking['Status']) {
                                 case 'pending': echo '⏳'; break;
+                                case 'accepted': echo '👨‍🔧'; break;
                                 case 'in-progress': echo '🔧'; break;
                                 case 'completed': echo '✅'; break;
                                 default: echo '📋'; break;
@@ -360,65 +410,103 @@ try {
                             <div class="timeline-header">
                                 <h4><?php echo htmlspecialchars($booking['Service_Type']); ?></h4>
                                 <span class="timeline-status status-<?php echo strtolower($booking['Status']); ?>">
-                                    <?php echo ucfirst($booking['Status']); ?>
+                                    <?php 
+                                    switch($booking['Status']) {
+                                        case 'pending':
+                                            echo 'Waiting for Technician';
+                                            break;
+                                        case 'accepted':
+                                            echo 'Technician Assigned';
+                                            break;
+                                        case 'in-progress':
+                                            echo 'Service in Progress';
+                                            break;
+                                        case 'completed':
+                                            echo 'Service Completed';
+                                            break;
+                                        default:
+                                            echo ucfirst($booking['Status']);
+                                    }
+                                    ?>
                                 </span>
                             </div>
                             <p class="timeline-description">
                                 <?php if (!empty($booking['Technician_FN'])): ?>
                                     👨‍🔧 Technician: <?php echo htmlspecialchars($booking['Technician_FN'] . ' ' . $booking['Technician_LN']); ?>
+                                    <br>📞 Phone: <?php echo htmlspecialchars($booking['Technician_Phone']); ?>
                                 <?php else: ?>
-                                    🔍 Searching for available technician...
+                                    🔍 Looking for available technicians in your area...
                                 <?php endif; ?>
                             </p>
+                            <?php if (!empty($booking['Description'])): ?>
+                                <p class="timeline-details">
+                                    <strong>Issue:</strong> <?php echo htmlspecialchars(substr($booking['Description'], 0, 100)) . (strlen($booking['Description']) > 100 ? '...' : ''); ?>
+                                </p>
+                            <?php endif; ?>
                             <div class="timeline-meta">
-                                <span class="timeline-date">📅 <?php echo date('M j, Y g:i A', strtotime($booking['AptDate'])); ?></span>
+                                <span class="timeline-date">📅 Requested: <?php echo date('M j, Y g:i A', strtotime($booking['Created_At'])); ?></span>
+                                <?php if ($booking['AptDate']): ?>
+                                    <span class="timeline-date">🕒 Scheduled: <?php echo date('M j, Y g:i A', strtotime($booking['AptDate'])); ?></span>
+                                <?php endif; ?>
                                 <span class="timeline-id">#<?php echo $booking['Booking_ID']; ?></span>
                             </div>
                         </div>
                         <div class="timeline-actions">
                             <a href="booking_details.php?id=<?php echo $booking['Booking_ID']; ?>" class="timeline-btn">View Details</a>
+                            <?php if (!empty($booking['Technician_ID'])): ?>
+                                <a href="messages.php?conversation_id=<?php echo $booking['Technician_ID']; ?>" class="timeline-btn secondary">Message</a>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <?php endwhile; ?>
                 </div>
                 <?php else: ?>
                 <div class="empty-activity">
-                    <div class="empty-icon">📋</div>
-                    <h3>No Recent Activity</h3>
-                    <p>Start your repair journey by requesting your first service!</p>
-                    <a href="request_service.php" class="empty-btn">Request First Service</a>
+                    <div class="empty-icon">📝</div>
+                    <h3>No Service Requests Yet</h3>
+                    <p>Start your repair journey by posting your first service request!</p>
+                    <a href="request_service.php" class="empty-btn">Create First Request</a>
                 </div>
                 <?php endif; ?>
             </section>
 
-            <!-- Recommended Technicians -->
-            <?php if ($recommended_techs && $recommended_techs->num_rows > 0): ?>
-            <section class="recommended-techs">
+            <!-- Available Technicians (Information Only) -->
+            <?php if ($available_techs && $available_techs->num_rows > 0): ?>
+            <section class="available-techs">
                 <h2 class="section-title">
-                    <span class="title-icon">⭐</span>
-                    Top-Rated Technicians
+                    <span class="title-icon">👨‍🔧</span>
+                    Available Technicians in Your Area
                 </h2>
-                <p class="section-subtitle">Highly recommended fixers based on your service history</p>
+                <p class="section-subtitle">These skilled professionals might respond to your service requests</p>
                 
                 <div class="techs-grid">
-                    <?php while ($tech = $recommended_techs->fetch_assoc()): ?>
+                    <?php while ($tech = $available_techs->fetch_assoc()): ?>
                     <div class="tech-card">
                         <div class="tech-avatar">
-                            <span><?php echo strtoupper(substr($tech['Technician_FN'], 0, 1)); ?></span>
+                            <?php if (!empty($tech['Technician_Profile'])): ?>
+                                <img src="../uploads/profile_pics/<?php echo htmlspecialchars($tech['Technician_Profile']); ?>" alt="Profile">
+                            <?php else: ?>
+                                <span><?php echo strtoupper(substr($tech['Technician_FN'], 0, 1)); ?></span>
+                            <?php endif; ?>
                         </div>
                         <div class="tech-info">
                             <h4><?php echo htmlspecialchars($tech['Technician_FN'] . ' ' . $tech['Technician_LN']); ?></h4>
                             <p class="tech-specialty"><?php echo htmlspecialchars($tech['Specialization'] ?? 'General Repair'); ?></p>
                             <div class="tech-stats">
-                                <span class="tech-rating">⭐ <?php echo number_format($tech['avg_rating'] ?? 4.5, 1); ?></span>
-                                <span class="tech-jobs"><?php echo $tech['completed_jobs']; ?> jobs</span>
+                                <span class="tech-rating">⭐ <?php echo number_format($tech['avg_rating'], 1); ?></span>
+                                <span class="tech-jobs"><?php echo $tech['completed_jobs']; ?> jobs completed</span>
                             </div>
+                            <p class="tech-price">₱<?php echo number_format($tech['Service_Pricing'] ?? 500); ?>/hour</p>
                         </div>
-                        <div class="tech-actions">
-                            <a href="book_technician.php?id=<?php echo $tech['Technician_ID']; ?>" class="tech-btn">Book Now</a>
+                        <div class="tech-status">
+                            <span class="status-badge available">Available</span>
                         </div>
                     </div>
                     <?php endwhile; ?>
+                </div>
+                
+                <div class="techs-note">
+                    <p>💡 <strong>Note:</strong> You cannot directly book these technicians. Post a service request and let them compete for your job!</p>
                 </div>
             </section>
             <?php endif; ?>
@@ -427,29 +515,29 @@ try {
             <section class="insights-section">
                 <h2 class="section-title">
                     <span class="title-icon">💡</span>
-                    Smart Tips & Insights
+                    Tips for Better Service Requests
                 </h2>
                 
                 <div class="insights-grid">
-                    <div class="insight-card maintenance">
-                        <div class="insight-icon">🔧</div>
-                        <h4>Preventive Maintenance</h4>
-                        <p>Schedule regular checkups to avoid costly repairs later.</p>
-                        <a href="maintenance_tips.php" class="insight-link">Learn More →</a>
+                    <div class="insight-card details">
+                        <div class="insight-icon">📝</div>
+                        <h4>Provide Clear Details</h4>
+                        <p>The more details you provide about the issue, the better quotes you'll receive.</p>
+                        <a href="request_service.php" class="insight-link">Create Request →</a>
                     </div>
                     
-                    <div class="insight-card communication">
-                        <div class="insight-icon">📱</div>
-                        <h4>Stay Connected</h4>
-                        <p>Enable notifications for real-time service updates.</p>
-                        <a href="notification_settings.php" class="insight-link">Settings →</a>
+                    <div class="insight-card photos">
+                        <div class="insight-icon">📷</div>
+                        <h4>Include Photos</h4>
+                        <p>Pictures help technicians understand the problem before they visit.</p>
+                        <a href="request_service.php" class="insight-link">Add Photos →</a>
                     </div>
                     
-                    <div class="insight-card feedback">
-                        <div class="insight-icon">⭐</div>
-                        <h4>Your Feedback Matters</h4>
-                        <p>Rate completed services to help improve our platform.</p>
-                        <a href="my_reviews.php" class="insight-link">View Reviews →</a>
+                    <div class="insight-card timing">
+                        <div class="insight-icon">⏰</div>
+                        <h4>Be Flexible with Timing</h4>
+                        <p>Flexible scheduling gets more responses from available technicians.</p>
+                        <a href="my_bookings.php" class="insight-link">Manage Schedule →</a>
                     </div>
                 </div>
             </section>
@@ -502,11 +590,25 @@ try {
                 }, 50);
             });
 
-            // Animate status cards
-            const statusCards = document.querySelectorAll('.status-card');
-            statusCards.forEach((card, index) => {
-                card.style.animationDelay = `${index * 0.1}s`;
-                card.classList.add('animate-slide-up');
+            // Process steps animation
+            const processSteps = document.querySelectorAll('.process-step');
+            const observerOptions = {
+                threshold: 0.5,
+                rootMargin: '0px 0px -100px 0px'
+            };
+
+            const stepsObserver = new IntersectionObserver((entries) => {
+                entries.forEach((entry, index) => {
+                    if (entry.isIntersecting) {
+                        setTimeout(() => {
+                            entry.target.classList.add('animate-step');
+                        }, index * 200);
+                    }
+                });
+            }, observerOptions);
+
+            processSteps.forEach(step => {
+                stepsObserver.observe(step);
             });
 
             // Action items hover effects
@@ -521,35 +623,6 @@ try {
                     this.style.transform = 'translateY(0) scale(1)';
                     this.style.boxShadow = '';
                 });
-            });
-
-            // Timeline items animation
-            const timelineItems = document.querySelectorAll('.timeline-item');
-            const observerOptions = {
-                threshold: 0.1,
-                rootMargin: '0px 0px -50px 0px'
-            };
-
-            const timelineObserver = new IntersectionObserver((entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        entry.target.classList.add('animate-fade-in');
-                    }
-                });
-            }, observerOptions);
-
-            timelineItems.forEach(item => {
-                timelineObserver.observe(item);
-            });
-
-            // Search functionality
-            const searchInput = document.querySelector('.search-input');
-            searchInput.addEventListener('focus', function() {
-                this.parentElement.classList.add('search-focused');
-            });
-
-            searchInput.addEventListener('blur', function() {
-                this.parentElement.classList.remove('search-focused');
             });
 
             // Dropdown menu
@@ -568,37 +641,62 @@ try {
             }
         });
 
-        // Add some CSS animations via JavaScript
+        // Add CSS animations
         const style = document.createElement('style');
         style.textContent = `
-            @keyframes slideUp {
+            .animate-step {
+                animation: stepReveal 0.8s ease-out forwards;
+            }
+
+            @keyframes stepReveal {
                 from {
                     opacity: 0;
-                    transform: translateY(30px);
+                    transform: translateY(30px) scale(0.9);
                 }
                 to {
                     opacity: 1;
-                    transform: translateY(0);
+                    transform: translateY(0) scale(1);
                 }
             }
 
-            @keyframes fadeIn {
-                from {
-                    opacity: 0;
-                    transform: translateX(-20px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
+            .process-step {
+                opacity: 0;
+                transform: translateY(30px) scale(0.9);
             }
 
-            .animate-slide-up {
-                animation: slideUp 0.6s ease-out forwards;
+            .status-badge.available {
+                background: linear-gradient(135deg, #10b981, #059669);
+                color: white;
+                padding: 0.25rem 0.5rem;
+                border-radius: 6px;
+                font-size: 0.75rem;
+                font-weight: 600;
             }
 
-            .animate-fade-in {
-                animation: fadeIn 0.6s ease-out forwards;
+            .techs-note {
+                background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+                border: 1px solid rgba(59, 130, 246, 0.2);
+                border-radius: 12px;
+                padding: 1rem;
+                margin-top: 1.5rem;
+                text-align: center;
+            }
+
+            .techs-note p {
+                margin: 0;
+                color: var(--gray-700);
+            }
+
+            .timeline-btn.secondary {
+                background: transparent;
+                color: var(--primary);
+                border: 1px solid var(--primary);
+                margin-left: 0.5rem;
+            }
+
+            .timeline-btn.secondary:hover {
+                background: var(--primary);
+                color: white;
             }
         `;
         document.head.appendChild(style);
