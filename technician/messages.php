@@ -309,12 +309,6 @@ if (isset($_GET['conversation_id'])) {
                                 <h3><?php echo htmlspecialchars($selected_conversation['Client_FN'] . ' ' . $selected_conversation['Client_LN']); ?></h3>
                                 <p>Client • <span class="online-status">Active</span></p>
                             </div>
-                            <div class="chat-actions">
-                                <button class="chat-action-btn" title="Call Client">📞</button>
-                                <button class="chat-action-btn" title="Video Call">📹</button>
-                                <button class="chat-action-btn" title="Send Service Update">📋</button>
-                                <button class="chat-action-btn" title="More Options">⋯</button>
-                            </div>
                         </div>
 
                         <!-- Messages -->
@@ -350,14 +344,12 @@ if (isset($_GET['conversation_id'])) {
                         <!-- Message Input -->
                         <div class="chat-input">
                             <form id="messageForm" class="input-container">
-                                <button type="button" class="attachment-btn" title="Attach Photo/Document">📎</button>
                                 <input type="hidden" name="receiver_id" value="<?php echo htmlspecialchars($_GET['conversation_id']); ?>">
                                 <input type="hidden" name="subject" value="Service Communication">
                                 <textarea name="message_text" id="messageText" class="message-input" placeholder="Type your message to client..." required maxlength="1000"></textarea>
                                 <div class="input-actions">
-                                    <button type="button" class="emoji-btn" title="Add Emoji">😊</button>
                                     <button type="submit" id="sendBtn" class="send-btn">
-                                        <span id="btnText">📤</span>
+                                        <span id="btnText">📤 SEND</span>
                                         <span id="btnLoader" style="display: none;">⏳</span>
                                     </button>
                                 </div>

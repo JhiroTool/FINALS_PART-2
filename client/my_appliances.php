@@ -209,8 +209,8 @@ function extractFromDescription($description, $field) {
                             <p>Premium Client</p>
                         </div>
                         <div class="user-dropdown">
-                            <button class="dropdown-btn">⚙️</button>
-                            <div class="dropdown-menu">
+                            <button class="dropdown-btn" onclick="toggleDropdown()">⚙️</button>
+                            <div class="dropdown-menu" id="userDropdown">
                                 <a href="client_dashboard.php">🏠 Dashboard</a>
                                 <a href="update_profile.php">👤 Profile Settings</a>
                                 <a href="my_bookings.php">📋 My Bookings</a>

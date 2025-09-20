@@ -138,7 +138,6 @@ try {
                         </div>
                         <div class="user-info">
                             <h3><?php echo htmlspecialchars($client['Client_FN']); ?></h3>
-                            <p>Premium Client</p>
                         </div>
                         <div class="user-dropdown">
                             <button class="dropdown-btn">⚙️</button>

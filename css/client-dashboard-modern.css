@@ -1126,6 +1126,34 @@ body {
     margin: 0;
 }
 
+/* Force light mode for How It Works - Override dark mode */
+.how-it-works {
+    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%) !important;
+}
+
+.process-step {
+    background: white !important;
+    border-color: rgba(0, 56, 168, 0.1) !important;
+    color: #1e293b !important;
+}
+
+.step-content h3 {
+    color: #1e293b !important;
+}
+
+.step-content p {
+    color: #64748b !important;
+}
+
+/* Fix hover effects */
+.process-step:hover .step-content h3 {
+    color: #0038A8 !important;
+}
+
+.process-step:hover .step-content p {
+    color: #374151 !important;
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .hero-content {
