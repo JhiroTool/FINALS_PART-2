@@ -17,13 +17,32 @@ $user_id = $_SESSION['user_id'];
 $message = '';
 $messageType = '';
 
+function isSubscriptionActive($flag, $expires) {
+    if (!$flag) {
+        return false;
+    }
+    if (empty($expires)) {
+        return true;
+    }
+    return strtotime($expires) > time();
+}
+
 // Get client info
-$stmt = $conn->prepare("SELECT Client_FN, Client_LN FROM client WHERE Client_ID = ?");
+$stmt = $conn->prepare("SELECT c.Client_FN, c.Client_LN, c.Is_Subscribed, c.Subscription_Expires, a.City
+                        FROM client c
+                        LEFT JOIN client_address ca ON c.Client_ID = ca.Client_ID
+                        LEFT JOIN address a ON ca.Address_ID = a.Address_ID
+                        WHERE c.Client_ID = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $result = $stmt->get_result();
 $client = $result->fetch_assoc();
 $stmt->close();
+
+$client_is_subscribed = isSubscriptionActive((int)($client['Is_Subscribed'] ?? 0), $client['Subscription_Expires'] ?? null);
+$client_city = $client['City'] ?? '';
+$client_badge = $client_is_subscribed ? 'Premium Client' : 'Standard Client';
+$subscription_expiry_text = $client_is_subscribed && $client['Subscription_Expires'] ? date('M j, Y', strtotime($client['Subscription_Expires'])) : null;
 
 // Handle form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -38,9 +57,42 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         VALUES (?, ?, ?, 'pending', ?)
     ");
     $booking_stmt->bind_param("isss", $user_id, $service_type, $apt_date, $description);
-    
+
     if ($booking_stmt->execute()) {
+        $new_booking_id = $conn->insert_id;
         $message = "🎉 Service request submitted successfully! We'll assign a verified technician within 30 minutes.";
+        if ($client_is_subscribed) {
+            $lookup_city = $client_city ?? '';
+            $tech_stmt = $conn->prepare("
+                SELECT t.Technician_ID
+                FROM technician t
+                LEFT JOIN technician_address ta ON t.Technician_ID = ta.Technician_ID
+                LEFT JOIN address a ON ta.Address_ID = a.Address_ID
+                WHERE t.Status = 'approved'
+                ORDER BY
+                    CASE
+                        WHEN t.Is_Subscribed = 1 AND (t.Subscription_Expires IS NULL OR t.Subscription_Expires = '0000-00-00 00:00:00' OR t.Subscription_Expires > NOW()) THEN 0
+                        ELSE 1
+                    END,
+                    CASE WHEN a.City = ? THEN 0 ELSE 1 END,
+                    t.Technician_ID ASC
+                LIMIT 1
+            ");
+            $tech_stmt->bind_param("s", $lookup_city);
+            $tech_stmt->execute();
+            $tech_result = $tech_stmt->get_result();
+            $selected_tech = $tech_result->fetch_assoc();
+            $tech_stmt->close();
+
+            if ($selected_tech && isset($selected_tech['Technician_ID'])) {
+                $assign_stmt = $conn->prepare("UPDATE booking SET Technician_ID = ?, Status = 'assigned' WHERE Booking_ID = ?");
+                $assign_stmt->bind_param("ii", $selected_tech['Technician_ID'], $new_booking_id);
+                if ($assign_stmt->execute()) {
+                    $message = "🚀 Priority service confirmed! We matched you with a nearby premium technician.";
+                }
+                $assign_stmt->close();
+            }
+        }
         $messageType = "success";
     } else {
         $message = "❌ Error submitting service request. Please try again or contact support.";
@@ -108,7 +160,10 @@ $service_categories = [
                         </div>
                         <div class="user-info">
                             <h3><?php echo htmlspecialchars($client['Client_FN']); ?></h3>
-                            <p>Premium Client</p>
+                            <p><?php echo htmlspecialchars($client_badge); ?></p>
+                            <?php if ($subscription_expiry_text): ?>
+                                <span style="display: inline-block; margin-top: 4px; padding: 4px 10px; border-radius: 10px; background: rgba(16, 185, 129, 0.15); color: #047857; font-size: 0.8rem; font-weight: 600;">Valid until <?php echo htmlspecialchars($subscription_expiry_text); ?></span>
+                            <?php endif; ?>
                         </div>
                         <div class="header-actions">
                             <a href="client_dashboard.php" class="btn-secondary">← Dashboard</a>

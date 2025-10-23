@@ -79,6 +79,18 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'admin') {
                 } catch (Exception $e) {
                     $total_bookings = 0;
                 }
+
+                try {
+                    $premium_clients = $conn->query("SELECT COUNT(*) as count FROM client WHERE Is_Subscribed = 1 AND (Subscription_Expires IS NULL OR Subscription_Expires = '0000-00-00 00:00:00' OR Subscription_Expires > NOW())")->fetch_assoc()['count'];
+                } catch (Exception $e) {
+                    $premium_clients = 0;
+                }
+
+                try {
+                    $premium_techs = $conn->query("SELECT COUNT(*) as count FROM technician WHERE Is_Subscribed = 1 AND (Subscription_Expires IS NULL OR Subscription_Expires = '0000-00-00 00:00:00' OR Subscription_Expires > NOW())")->fetch_assoc()['count'];
+                } catch (Exception $e) {
+                    $premium_techs = 0;
+                }
                 ?>
                 
                 <div class="stat-card pending">
@@ -89,22 +101,24 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'admin') {
                     </div>
                 </div>
                 
-                <div class="stat-card success">
-                    <div class="stat-icon">🔧</div>
-                    <div class="stat-info">
-                        <h3><?php echo $total_techs; ?></h3>
-                        <p>Active Technicians</p>
-                    </div>
-                </div>
-                
                 <div class="stat-card info">
                     <div class="stat-icon">👥</div>
                     <div class="stat-info">
                         <h3><?php echo $total_clients; ?></h3>
                         <p>Total Clients</p>
+                        <span class="stat-subtitle"><?php echo $premium_clients; ?> premium</span>
                     </div>
                 </div>
                 
+                <div class="stat-card success">
+                    <div class="stat-icon">🔧</div>
+                    <div class="stat-info">
+                        <h3><?php echo $total_techs; ?></h3>
+                        <p>Active Technicians</p>
+                        <span class="stat-subtitle"><?php echo $premium_techs; ?> premium</span>
+                    </div>
+                </div>
+
                 <div class="stat-card warning">
                     <div class="stat-icon">📋</div>
                     <div class="stat-info">
@@ -181,6 +195,15 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'admin') {
                             // Handle error silently
                         }
                         ?>
+                    </div>
+                    <div class="action-arrow">→</div>
+                </a>
+
+                <a href="manage_subscriptions.php" class="action-card accent">
+                    <div class="action-icon">🌟</div>
+                    <div class="action-content">
+                        <h3>Subscription Payments</h3>
+                        <p>Review and approve premium plans</p>
                     </div>
                     <div class="action-arrow">→</div>
                 </a>

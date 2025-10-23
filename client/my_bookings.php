@@ -21,11 +21,12 @@ $stmt->close();
 // Handle AJAX requests for cancellation
 if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
     $booking_id = intval($_POST['booking_id']);
-    
+
     // Verify ownership and update status
-    $cancel_stmt = $conn->prepare("UPDATE booking SET Status = 'cancelled' WHERE Booking_ID = ? AND Client_ID = ? AND Status = 'pending'");
+    header('Content-Type: application/json');
+    $cancel_stmt = $conn->prepare("UPDATE booking SET Status = 'cancelled' WHERE Booking_ID = ? AND Client_ID = ? AND Status IN ('pending','assigned')");
     $cancel_stmt->bind_param("ii", $booking_id, $user_id);
-    
+
     if ($cancel_stmt->execute() && $cancel_stmt->affected_rows > 0) {
         echo json_encode(['success' => true, 'message' => 'Booking cancelled successfully']);
     } else {
@@ -116,8 +117,8 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                     // Get quick stats for hero
                     $stats_query = "
                         SELECT 
-                            SUM(CASE WHEN Status = 'pending' THEN 1 ELSE 0 END) as pending_count,
-                            SUM(CASE WHEN Status = 'in-progress' THEN 1 ELSE 0 END) as progress_count,
+                            SUM(CASE WHEN Status IN ('pending', 'assigned') THEN 1 ELSE 0 END) as pending_count,
+                            SUM(CASE WHEN Status = 'in_progress' THEN 1 ELSE 0 END) as progress_count,
                             SUM(CASE WHEN Status = 'completed' THEN 1 ELSE 0 END) as completed_count,
                             COUNT(*) as total_count
                         FROM booking 
@@ -178,49 +179,57 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                     'title' => 'Pending Requests', 
                     'icon' => '⏳', 
                     'class' => 'pending',
-                    'description' => 'Waiting for technician assignment'
+                    'description' => 'Waiting for technician assignment',
+                    'filters' => ['pending', 'assigned']
                 ],
-                'in-progress' => [
+                'in_progress' => [
                     'title' => 'Services In Progress', 
                     'icon' => '🔧', 
                     'class' => 'progress',
-                    'description' => 'Currently being worked on'
+                    'description' => 'Currently being worked on',
+                    'filters' => ['in_progress']
                 ],
                 'completed' => [
                     'title' => 'Completed Services', 
                     'icon' => '✅', 
                     'class' => 'completed',
-                    'description' => 'Successfully finished repairs'
+                    'description' => 'Successfully finished repairs',
+                    'filters' => ['completed']
                 ]
             ];
 
             foreach ($statuses as $status => $config):
                 try {
+                    $placeholders = implode(',', array_fill(0, count($config['filters']), '?'));
                     $bookings_query = "
-                        SELECT b.*, t.Technician_FN, t.Technician_LN, t.Technician_Phone, t.Specialization
+                        SELECT b.*, t.Technician_FN, t.Technician_LN, t.Technician_Phone, t.Specialization, t.Service_Pricing,
+                               jp.JobPayment_ID, jp.Amount AS JobPayment_Amount, jp.Method AS JobPayment_Method, jp.Status AS JobPayment_Status
                         FROM booking b 
                         LEFT JOIN technician t ON b.Technician_ID = t.Technician_ID 
-                        WHERE b.Client_ID = ? AND b.Status = ? 
+                        LEFT JOIN job_payments jp ON jp.Booking_ID = b.Booking_ID
+                        WHERE b.Client_ID = ? AND b.Status IN ($placeholders)
                         ORDER BY b.AptDate DESC
                     ";
                     
                     $bookings_stmt = $conn->prepare($bookings_query);
-                    $bookings_stmt->bind_param("is", $user_id, $status);
+                    $types = 'i' . str_repeat('s', count($config['filters']));
+                    $params = array_merge([$user_id], $config['filters']);
+                    $bookings_stmt->bind_param($types, ...$params);
                     $bookings_stmt->execute();
                     $bookings_result = $bookings_stmt->get_result();
                     $booking_count = $bookings_result->num_rows;
             ?>
                     <section class="marketplace-actions" style="margin-bottom: 3rem;">
-                        <div class="section-title-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border-left: 6px solid <?php echo $status === 'pending' ? '#f59e0b' : ($status === 'in-progress' ? '#3b82f6' : '#10b981'); ?>;">
+                        <div class="section-title-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border-left: 6px solid <?php echo $status === 'pending' ? '#f59e0b' : ($status === 'in_progress' ? '#3b82f6' : '#10b981'); ?>;">
                             <div>
                                 <h2 class="section-title">
-                                    <span class="title-icon" style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : ($status === 'in-progress' ? 'linear-gradient(135deg, #dbeafe, #bfdbfe)' : 'linear-gradient(135deg, #dcfce7, #bbf7d0)'); ?>; color: <?php echo $status === 'pending' ? '#92400e' : ($status === 'in-progress' ? '#1d4ed8' : '#047857'); ?>; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"><?php echo $config['icon']; ?></span>
+                                    <span class="title-icon" style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : ($status === 'in_progress' ? 'linear-gradient(135deg, #dbeafe, #bfdbfe)' : 'linear-gradient(135deg, #dcfce7, #bbf7d0)'); ?>; color: <?php echo $status === 'pending' ? '#92400e' : ($status === 'in_progress' ? '#1d4ed8' : '#047857'); ?>; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"><?php echo $config['icon']; ?></span>
                                     <?php echo $config['title']; ?>
                                 </h2>
                                 <p style="color: #64748b; margin-top: 0.5rem;"><?php echo $config['description']; ?></p>
                             </div>
                             <div style="text-align: center;">
-                                <div style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : ($status === 'in-progress' ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'linear-gradient(135deg, #10b981, #059669)'); ?>; color: white; padding: 12px 24px; border-radius: 20px; font-weight: 700; font-size: 1.1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                                <div style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : ($status === 'in_progress' ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'linear-gradient(135deg, #10b981, #059669)'); ?>; color: white; padding: 12px 24px; border-radius: 20px; font-weight: 700; font-size: 1.1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
                                     <?php echo $booking_count; ?> service<?php echo $booking_count !== 1 ? 's' : ''; ?>
                                 </div>
                             </div>
@@ -234,7 +243,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                             <div class="action-badge">Urgent</div>
                                         <?php endif; ?>
                                         
-                                        <div class="action-icon" style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : ($status === 'in-progress' ? 'linear-gradient(135deg, #dbeafe, #bfdbfe)' : 'linear-gradient(135deg, #dcfce7, #bbf7d0)'); ?>; color: <?php echo $status === 'pending' ? '#92400e' : ($status === 'in-progress' ? '#1d4ed8' : '#047857'); ?>;">
+                                        <div class="action-icon" style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : ($status === 'in_progress' ? 'linear-gradient(135deg, #dbeafe, #bfdbfe)' : 'linear-gradient(135deg, #dcfce7, #bbf7d0)'); ?>; color: <?php echo $status === 'pending' ? '#92400e' : ($status === 'in_progress' ? '#1d4ed8' : '#047857'); ?>;">
                                             <?php echo $config['icon']; ?>
                                         </div>
                                         
@@ -279,6 +288,13 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                                 </div>
                                             <?php endif; ?>
 
+                                            <?php if ($status === 'completed' && !empty($booking['JobPayment_ID'])): ?>
+                                                <div style="background: rgba(16, 185, 129, 0.1); padding: 0.75rem; border-radius: 8px; margin: 1rem 0; border-left: 3px solid #10b981; color: #047857;">
+                                                    <strong>💳 Payment Settled:</strong>
+                                                    <span>₱<?php echo number_format((float)$booking['JobPayment_Amount'], 2); ?> via <?php echo htmlspecialchars(ucfirst($booking['JobPayment_Method'])); ?></span>
+                                                </div>
+                                            <?php endif; ?>
+
                                             <?php if ($status === 'completed' && !empty($booking['Rating'])): ?>
                                                 <div style="background: rgba(245, 158, 11, 0.1); padding: 0.75rem; border-radius: 8px; margin: 1rem 0;">
                                                     <strong style="color: #374151;">⭐ Your Rating:</strong>
@@ -294,7 +310,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                         </div>
                                         
                                         <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.5rem;">
-                                            <?php if ($status === 'pending'): ?>
+                                            <?php if (in_array($booking['Status'], ['pending', 'assigned'], true)): ?>
                                                 <button class="action-btn" style="background: linear-gradient(135deg, #ef4444, #dc2626);" onclick="cancelBooking(<?php echo $booking['Booking_ID']; ?>)">
                                                     ❌ Cancel Request
                                                 </button>
@@ -306,12 +322,22 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                                 </a>
                                             <?php endif; ?>
 
-                                            <?php if ($status === 'in-progress'): ?>
+                                            <?php if ($status === 'in_progress'): ?>
                                                 <button class="action-btn" style="background: linear-gradient(135deg, #f59e0b, #d97706);" onclick="trackService(<?php echo $booking['Booking_ID']; ?>)">
                                                     📍 Track Progress
                                                 </button>
                                             <?php endif; ?>
-                                            
+
+                                            <?php if ($status === 'completed' && empty($booking['JobPayment_ID'])): ?>
+                                                <button class="action-btn" style="background: linear-gradient(135deg, #10b981, #047857);" onclick="openPaymentModal(<?php echo $booking['Booking_ID']; ?>, <?php echo json_encode((float)($booking['Service_Pricing'] ?? 0)); ?>)">
+                                                    💳 Settle Payment
+                                                </button>
+                                            <?php elseif ($status === 'completed' && !empty($booking['JobPayment_ID'])): ?>
+                                                <div class="action-btn" style="background: linear-gradient(135deg, #10b981, #059669); cursor: default;">
+                                                    ✅ Paid via <?php echo htmlspecialchars($booking['JobPayment_Method']); ?>
+                                                </div>
+                                            <?php endif; ?>
+
                                             <?php if ($status === 'completed' && empty($booking['Rating'])): ?>
                                                 <button class="action-btn" style="background: linear-gradient(135deg, #f59e0b, #d97706);" onclick="rateService(<?php echo $booking['Booking_ID']; ?>)">
                                                     ⭐ Rate Service
@@ -331,7 +357,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                         case 'pending':
                                             echo 'You have no pending service requests. Ready to get your appliances fixed?';
                                             break;
-                                        case 'in-progress':
+                                        case 'in_progress':
                                             echo 'No services currently in progress. Once a technician accepts your request, it will appear here with real-time updates.';
                                             break;
                                         case 'completed':
@@ -355,6 +381,38 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                 }
             endforeach;
             ?>
+        </div>
+    </div>
+
+    <div class="payment-modal" id="paymentModal">
+        <div class="payment-modal-content">
+            <button type="button" class="payment-close" onclick="closePaymentModal()">×</button>
+            <h3>Settle Service Payment</h3>
+            <form id="paymentForm">
+                <div class="payment-field">
+                    <label for="paymentAmount">Amount (₱)</label>
+                    <input type="number" id="paymentAmount" name="amount" min="0" step="0.01" required>
+                </div>
+                <div class="payment-field">
+                    <label for="paymentMethod">Payment Method</label>
+                    <select id="paymentMethod" name="method" required>
+                        <option value="">Select method</option>
+                        <option value="cash">Cash</option>
+                        <option value="gcash">GCash</option>
+                        <option value="bank_transfer">Bank Transfer</option>
+                        <option value="paymaya">PayMaya</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="payment-field">
+                    <label for="paymentNotes">Notes (optional)</label>
+                    <textarea id="paymentNotes" name="notes" rows="3" placeholder="Add reference numbers or remarks"></textarea>
+                </div>
+                <div class="payment-actions">
+                    <button type="button" class="payment-btn secondary" onclick="closePaymentModal()">Cancel</button>
+                    <button type="submit" class="payment-btn primary" id="paymentSubmitBtn">Confirm Payment</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -391,11 +449,118 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
         </div>
     </footer>
 
+    <style>
+        .payment-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            padding: 1.5rem;
+        }
+        .payment-modal.show {
+            display: flex;
+        }
+        .payment-modal-content {
+            background: #fff;
+            border-radius: 18px;
+            padding: 2rem;
+            width: min(420px, 100%);
+            box-shadow: 0 25px 60px rgba(15, 23, 42, 0.25);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+        .payment-modal-content h3 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: #0f172a;
+        }
+        .payment-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            border: none;
+            background: transparent;
+            font-size: 1.75rem;
+            cursor: pointer;
+            color: #94a3b8;
+        }
+        .payment-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+        }
+        .payment-field label {
+            font-weight: 600;
+            color: #1e293b;
+        }
+        .payment-field input,
+        .payment-field select,
+        .payment-field textarea {
+            border-radius: 12px;
+            border: 1px solid #cbd5f5;
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .payment-field input:focus,
+        .payment-field select:focus,
+        .payment-field textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        .payment-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+        .payment-btn {
+            border: none;
+            border-radius: 999px;
+            padding: 0.75rem 1.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .payment-btn.primary {
+            background: linear-gradient(135deg, #10b981, #047857);
+            color: #fff;
+            box-shadow: 0 12px 30px rgba(16, 185, 129, 0.2);
+        }
+        .payment-btn.secondary {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+        .payment-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .payment-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+        }
+    </style>
+
     <script>
         // Fixed dropdown functionality
         document.addEventListener('DOMContentLoaded', function() {
             const dropdownBtn = document.querySelector('.dropdown-btn');
             const dropdownMenu = document.querySelector('.dropdown-menu');
+            const paymentModal = document.getElementById('paymentModal');
+            const paymentForm = document.getElementById('paymentForm');
+            const paymentAmountInput = document.getElementById('paymentAmount');
+            const paymentMethodSelect = document.getElementById('paymentMethod');
+            const paymentNotesInput = document.getElementById('paymentNotes');
+            const paymentSubmitBtn = document.getElementById('paymentSubmitBtn');
+            let activeBookingId = null;
             
             if (dropdownBtn && dropdownMenu) {
                 dropdownBtn.addEventListener('click', function(e) {
@@ -449,6 +614,88 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                 link.addEventListener('click', function() {
                     showNotification('📞 Opening your phone app to call the technician...', 'info');
                 });
+            });
+
+            if (paymentForm) {
+                paymentForm.addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    if (!activeBookingId) {
+                        return;
+                    }
+
+                    const amountValue = parseFloat(paymentAmountInput.value || '0');
+                    if (!(amountValue > 0)) {
+                        showNotification('❌ Enter a valid amount greater than zero', 'error');
+                        return;
+                    }
+
+                    const methodValue = paymentMethodSelect.value.trim();
+                    if (!methodValue) {
+                        showNotification('❌ Select a payment method', 'error');
+                        return;
+                    }
+
+                    paymentSubmitBtn.disabled = true;
+                    paymentSubmitBtn.textContent = 'Processing...';
+
+                    try {
+                        const response = await fetch('settle_payment.php', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded'
+                            },
+                            body: new URLSearchParams({
+                                booking_id: activeBookingId,
+                                amount: amountValue.toFixed(2),
+                                method: methodValue,
+                                notes: paymentNotesInput.value.trim()
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Unable to record payment');
+                        }
+
+                        const result = await response.json();
+                        if (!result.success) {
+                            throw new Error(result.message || 'Payment failed');
+                        }
+
+                        showNotification('✅ Payment recorded successfully', 'success');
+                        closePaymentModal();
+                        setTimeout(() => window.location.reload(), 1200);
+                    } catch (error) {
+                        showNotification(`❌ ${error.message}`, 'error');
+                    } finally {
+                        paymentSubmitBtn.disabled = false;
+                        paymentSubmitBtn.textContent = 'Confirm Payment';
+                    }
+                });
+            }
+
+            window.openPaymentModal = function(bookingId, suggestedAmount) {
+                activeBookingId = bookingId;
+                paymentAmountInput.value = suggestedAmount && suggestedAmount > 0 ? suggestedAmount.toFixed(2) : '';
+                paymentMethodSelect.value = '';
+                paymentNotesInput.value = '';
+                paymentModal.classList.add('show');
+            };
+
+            window.closePaymentModal = function() {
+                activeBookingId = null;
+                paymentModal.classList.remove('show');
+            };
+
+            paymentModal.addEventListener('click', function(e) {
+                if (e.target === paymentModal) {
+                    closePaymentModal();
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && paymentModal.classList.contains('show')) {
+                    closePaymentModal();
+                }
             });
         });
 

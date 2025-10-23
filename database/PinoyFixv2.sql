@@ -151,15 +151,17 @@ CREATE TABLE `client` (
   `Client_LN` varchar(255) DEFAULT NULL,
   `Client_Email` varchar(255) DEFAULT NULL,
   `Client_Pass` varchar(255) DEFAULT NULL,
-  `Client_Phone` varchar(255) DEFAULT NULL
+  `Client_Phone` varchar(255) DEFAULT NULL,
+  `Is_Subscribed` tinyint(1) NOT NULL DEFAULT 0,
+  `Subscription_Expires` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `client`
 --
 
-INSERT INTO `client` (`Client_ID`, `Admin_ID`, `Client_FN`, `Client_LN`, `Client_Email`, `Client_Pass`, `Client_Phone`) VALUES
-(1, NULL, 'jhiro', 'tool', 'jhiroramir@gmail.com', '$2y$10$rIFKbX93xvGTqtCqdY0XbuSxwiehdt.5ZbxWTWTaXLfXgSfc2ArfK', '09151046166');
+INSERT INTO `client` (`Client_ID`, `Admin_ID`, `Client_FN`, `Client_LN`, `Client_Email`, `Client_Pass`, `Client_Phone`, `Is_Subscribed`, `Subscription_Expires`) VALUES
+(1, NULL, 'jhiro', 'tool', 'jhiroramir@gmail.com', '$2y$10$rIFKbX93xvGTqtCqdY0XbuSxwiehdt.5ZbxWTWTaXLfXgSfc2ArfK', '09151046166', 0, NULL);
 
 -- --------------------------------------------------------
 
@@ -248,6 +250,39 @@ CREATE TABLE `payment` (
   `Payment_Status` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `job_payments`
+--
+
+CREATE TABLE `job_payments` (
+  `JobPayment_ID` int(11) NOT NULL,
+  `Booking_ID` int(11) NOT NULL,
+  `Client_ID` int(11) NOT NULL,
+  `Technician_ID` int(11) NOT NULL,
+  `Amount` decimal(10,2) NOT NULL,
+  `Method` varchar(50) NOT NULL DEFAULT 'cash',
+  `Notes` text DEFAULT NULL,
+  `Status` enum('pending','paid','refunded') NOT NULL DEFAULT 'paid',
+  `Confirmed_By` enum('client','admin') NOT NULL DEFAULT 'client',
+  `Confirmed_At` datetime NOT NULL,
+  `Created_At` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `technician_wallet`
+--
+
+CREATE TABLE `technician_wallet` (
+  `Wallet_ID` int(11) NOT NULL,
+  `Technician_ID` int(11) NOT NULL,
+  `Balance` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `Updated_At` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 --
 -- Dumping data for table `payment`
 --
@@ -276,16 +311,18 @@ CREATE TABLE `technician` (
   `Status` varchar(255) DEFAULT NULL,
   `Ratings` varchar(255) DEFAULT NULL,
   `Technician_Profile` varchar(255) DEFAULT NULL,
-  `Tech_Certificate` varchar(255) DEFAULT NULL
+  `Tech_Certificate` varchar(255) DEFAULT NULL,
+  `Is_Subscribed` tinyint(1) NOT NULL DEFAULT 0,
+  `Subscription_Expires` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `technician`
 --
 
-INSERT INTO `technician` (`Technician_ID`, `Admin_ID`, `Technician_FN`, `Technician_LN`, `Technician_Email`, `Technician_Pass`, `Technician_Phone`, `Specialization`, `Service_Pricing`, `Service_Location`, `Status`, `Ratings`, `Technician_Profile`, `Tech_Certificate`) VALUES
-(1, NULL, 'tech', 'nician', 'tech@gmail.com', '$2y$10$VFtRZqEMGZ.P2G0LIOKhPe858K4hDWMZXp8s7WFjbukPCVqD82xaO', '09151046167', 'Appliance Repair', '600', 'Lipa City', 'approved', '0.0', NULL, 'cert_1_1756544963.jpg'),
-(2, NULL, 'timo', 'baracael', 'timo@gmail.com', '$2y$10$wVo3HaK8NB67gJZYgYYl9eQOAQVL2sjZM2kc8FOMEd6AcL2vSDu4q', '09151046163', 'Electronics', '800', 'cuenca', 'approved', '0.0', NULL, NULL);
+INSERT INTO `technician` (`Technician_ID`, `Admin_ID`, `Technician_FN`, `Technician_LN`, `Technician_Email`, `Technician_Pass`, `Technician_Phone`, `Specialization`, `Service_Pricing`, `Service_Location`, `Status`, `Ratings`, `Technician_Profile`, `Tech_Certificate`, `Is_Subscribed`, `Subscription_Expires`) VALUES
+(1, NULL, 'tech', 'nician', 'tech@gmail.com', '$2y$10$VFtRZqEMGZ.P2G0LIOKhPe858K4hDWMZXp8s7WFjbukPCVqD82xaO', '09151046167', 'Appliance Repair', '600', 'Lipa City', 'approved', '0.0', NULL, 'cert_1_1756544963.jpg', 0, NULL),
+(2, NULL, 'timo', 'baracael', 'timo@gmail.com', '$2y$10$wVo3HaK8NB67gJZYgYYl9eQOAQVL2sjZM2kc8FOMEd6AcL2vSDu4q', '09151046163', 'Electronics', '800', 'cuenca', 'approved', '0.0', NULL, NULL, 0, NULL);
 
 -- --------------------------------------------------------
 
@@ -320,6 +357,28 @@ CREATE TABLE `technician_earnings` (
   `Amount` decimal(10,2) NOT NULL,
   `Date_Earned` datetime NOT NULL,
   `Status` enum('pending','paid') DEFAULT 'pending'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `subscription_payments`
+--
+
+CREATE TABLE `subscription_payments` (
+  `Payment_ID` int(11) NOT NULL,
+  `User_ID` int(11) NOT NULL,
+  `User_Type` enum('client','technician') NOT NULL,
+  `Amount` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `Currency` varchar(10) NOT NULL DEFAULT 'PHP',
+  `Gateway` varchar(50) DEFAULT 'manual',
+  `Reference` varchar(255) DEFAULT NULL,
+  `Plan_Days` int(11) NOT NULL DEFAULT 30,
+  `Status` enum('pending','paid','cancelled') NOT NULL DEFAULT 'pending',
+  `Created_At` timestamp NOT NULL DEFAULT current_timestamp(),
+  `Paid_At` datetime DEFAULT NULL,
+  `Expires_At` datetime DEFAULT NULL,
+  `Notes` text DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -414,11 +473,39 @@ ALTER TABLE `payment`
   ADD KEY `Booking_ID` (`Booking_ID`);
 
 --
+-- Indexes for table `job_payments`
+--
+
+ALTER TABLE `job_payments`
+  ADD PRIMARY KEY (`JobPayment_ID`),
+  ADD UNIQUE KEY `uniq_job_payment_booking` (`Booking_ID`),
+  ADD KEY `idx_job_payment_client` (`Client_ID`),
+  ADD KEY `idx_job_payment_technician` (`Technician_ID`),
+  ADD KEY `idx_job_payment_status` (`Status`);
+
+--
+-- Indexes for table `technician_wallet`
+--
+
+ALTER TABLE `technician_wallet`
+  ADD PRIMARY KEY (`Wallet_ID`),
+  ADD UNIQUE KEY `uniq_wallet_technician` (`Technician_ID`);
+
+--
 -- Indexes for table `technician`
 --
 ALTER TABLE `technician`
   ADD PRIMARY KEY (`Technician_ID`),
   ADD KEY `Admin_ID` (`Admin_ID`);
+
+--
+-- Constraints for table `job_payments`
+--
+
+ALTER TABLE `job_payments`
+  ADD CONSTRAINT `job_payments_ibfk_booking` FOREIGN KEY (`Booking_ID`) REFERENCES `booking` (`Booking_ID`) ON DELETE CASCADE,
+  ADD CONSTRAINT `job_payments_ibfk_client` FOREIGN KEY (`Client_ID`) REFERENCES `client` (`Client_ID`) ON DELETE CASCADE,
+  ADD CONSTRAINT `job_payments_ibfk_technician` FOREIGN KEY (`Technician_ID`) REFERENCES `technician` (`Technician_ID`) ON DELETE CASCADE;
 
 --
 -- Indexes for table `technician_address`
@@ -435,6 +522,14 @@ ALTER TABLE `technician_earnings`
   ADD PRIMARY KEY (`Earnings_ID`),
   ADD KEY `Technician_ID` (`Technician_ID`),
   ADD KEY `Booking_ID` (`Booking_ID`);
+
+--
+-- Indexes for table `subscription_payments`
+--
+ALTER TABLE `subscription_payments`
+  ADD PRIMARY KEY (`Payment_ID`),
+  ADD KEY `idx_subscription_user` (`User_ID`,`User_Type`),
+  ADD KEY `idx_subscription_status` (`Status`);
 
 --
 -- AUTO_INCREMENT for dumped tables
@@ -510,7 +605,21 @@ ALTER TABLE `messages`
 -- AUTO_INCREMENT for table `payment`
 --
 ALTER TABLE `payment`
-  MODIFY `Payment_ID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+  MODIFY `Payment_ID` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `job_payments`
+--
+
+ALTER TABLE `job_payments`
+  MODIFY `JobPayment_ID` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `technician_wallet`
+--
+
+ALTER TABLE `technician_wallet`
+  MODIFY `Wallet_ID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `technician`
@@ -529,6 +638,12 @@ ALTER TABLE `technician_address`
 --
 ALTER TABLE `technician_earnings`
   MODIFY `Earnings_ID` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `subscription_payments`
+--
+ALTER TABLE `subscription_payments`
+  MODIFY `Payment_ID` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- Constraints for dumped tables

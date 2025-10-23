@@ -13,7 +13,7 @@ $message = '';
 $messageType = '';
 
 // Handle status updates
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_status'])) {
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['booking_id'], $_POST['new_status'])) {
     $booking_id = $_POST['booking_id'];
     $new_status = $_POST['new_status'];
     
