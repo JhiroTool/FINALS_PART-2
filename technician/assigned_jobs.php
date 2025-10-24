@@ -1,6 +1,7 @@
 <?php
 session_start();
 include '../connection.php';
+require_once __DIR__ . '/../booking_workflow_helper.php';
 
 // Check if user is technician
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'technician') {
@@ -12,22 +13,74 @@ $user_id = $_SESSION['user_id'];
 $message = '';
 $messageType = '';
 
-// Handle status updates
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['booking_id'], $_POST['new_status'])) {
-    $booking_id = $_POST['booking_id'];
-    $new_status = $_POST['new_status'];
-    
-    $stmt = $conn->prepare("UPDATE booking SET Status = ? WHERE Booking_ID = ? AND Technician_ID = ?");
-    $stmt->bind_param("sii", $new_status, $booking_id, $user_id);
-    
-    if ($stmt->execute()) {
-        $message = "Job status updated successfully! 🎉";
-        $messageType = "success";
-    } else {
-        $message = "Error updating job status. Please try again.";
-        $messageType = "error";
+function ensureTechnicianOwnsBooking(mysqli $conn, int $bookingId, int $technicianId): bool
+{
+    $stmt = $conn->prepare("SELECT Booking_ID FROM booking WHERE Booking_ID = ? AND Technician_ID = ? LIMIT 1");
+    if (!$stmt) {
+        return false;
     }
+    $stmt->bind_param('ii', $bookingId, $technicianId);
+    $stmt->execute();
+    $stmt->store_result();
+    $owns = $stmt->num_rows === 1;
     $stmt->close();
+    return $owns;
+}
+
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['booking_id'], $_POST['action'])) {
+    $booking_id = (int)$_POST['booking_id'];
+    $action = $_POST['action'];
+
+    if (!ensureTechnicianOwnsBooking($conn, $booking_id, $user_id)) {
+        $message = "Booking not found or already reassigned.";
+        $messageType = "error";
+    } else {
+        switch ($action) {
+            case 'accept':
+                if (markTechnicianAcceptance($conn, $booking_id, $user_id)) {
+                    $message = "Booking accepted!";
+                    $messageType = "success";
+                } else {
+                    $message = "Unable to accept booking. It may have been updated.";
+                    $messageType = "error";
+                }
+                break;
+            case 'decline':
+                if (resetBookingToPending($conn, $booking_id)) {
+                    $message = "Booking returned to the queue.";
+                    $messageType = "success";
+                } else {
+                    $message = "Unable to decline booking.";
+                    $messageType = "error";
+                }
+                break;
+            case 'start':
+                $stmt = $conn->prepare("UPDATE booking SET Status = 'in_progress' WHERE Booking_ID = ? AND Technician_ID = ? AND Status IN ('assigned','awaiting_acceptance','pending')");
+                if ($stmt) {
+                    $stmt->bind_param('ii', $booking_id, $user_id);
+                    $stmt->execute();
+                    if ($stmt->affected_rows > 0) {
+                        $message = "Job marked as in progress.";
+                        $messageType = "success";
+                    } else {
+                        $message = "Unable to update status.";
+                        $messageType = "error";
+                    }
+                    $stmt->close();
+                }
+                break;
+            case 'complete':
+                $result = markBookingConfirmation($conn, $booking_id, 'technician');
+                if ($result['success']) {
+                    $message = $result['completed'] ? "Job completed!" : "Marked complete. Awaiting client confirmation.";
+                    $messageType = "success";
+                } else {
+                    $message = $result['message'] ?? "Unable to confirm completion.";
+                    $messageType = "error";
+                }
+                break;
+        }
+    }
 }
 
 // Get technician info
@@ -97,17 +150,29 @@ $tech_stmt->close();
             <!-- Jobs Sections -->
             <?php
             $statuses = [
-                'assigned' => [
-                    'title' => 'New Assignments',
+                'awaiting_acceptance' => [
+                    'title' => 'New Booking Requests',
                     'icon' => '🆕',
-                    'class' => 'assigned',
-                    'description' => 'Fresh opportunities waiting for you'
+                    'class' => 'awaiting-acceptance',
+                    'description' => 'Review and accept or decline these bookings'
+                ],
+                'assigned' => [
+                    'title' => 'Admin Assigned',
+                    'icon' => '📌',
+                    'class' => 'assigned-secondary',
+                    'description' => 'Bookings pre-assigned that still need action'
                 ],
                 'in_progress' => [
                     'title' => 'Active Projects',
                     'icon' => '🔧',
                     'class' => 'progress',
                     'description' => 'Jobs currently in progress'
+                ],
+                'awaiting_confirmation' => [
+                    'title' => 'Awaiting Client Confirmation',
+                    'icon' => '📝',
+                    'class' => 'awaiting-confirmation',
+                    'description' => 'Waiting for the client to confirm completion'
                 ],
                 'completed' => [
                     'title' => 'Completed Work',
@@ -126,7 +191,7 @@ $tech_stmt->close();
                         LEFT JOIN client c ON b.Client_ID = c.Client_ID 
                         LEFT JOIN client_address ca ON c.Client_ID = ca.Client_ID
                         LEFT JOIN address a ON ca.Address_ID = a.Address_ID
-                        WHERE b.Technician_ID = ? AND b.Status = ? 
+                        WHERE b.Technician_ID = ? AND b.Status = ?
                         ORDER BY b.AptDate ASC
                     ";
                     
@@ -218,28 +283,41 @@ $tech_stmt->close();
                                         </div>
 
                                         <div class="job-actions">
-                                            <?php if ($status === 'assigned'): ?>
-                                                <form method="POST" style="display: inline;">
+                                            <?php if ($status === 'awaiting_acceptance'): ?>
+                                                <form method="POST">
                                                     <input type="hidden" name="booking_id" value="<?php echo $job['Booking_ID']; ?>">
-                                                    <input type="hidden" name="new_status" value="in_progress">
-                                                    <button type="submit" name="update_status" class="btn btn-primary">
-                                                        🚀 Start Project
-                                                    </button>
+                                                    <input type="hidden" name="action" value="accept">
+                                                    <button type="submit" class="btn btn-primary">✅ Accept Booking</button>
+                                                </form>
+                                                <form method="POST">
+                                                    <input type="hidden" name="booking_id" value="<?php echo $job['Booking_ID']; ?>">
+                                                    <input type="hidden" name="action" value="decline">
+                                                    <button type="submit" class="btn btn-secondary" style="border-color: rgba(239,68,68,0.4); color: #ef4444;">❌ Decline</button>
+                                                </form>
+                                            <?php elseif ($status === 'assigned'): ?>
+                                                <form method="POST">
+                                                    <input type="hidden" name="booking_id" value="<?php echo $job['Booking_ID']; ?>">
+                                                    <input type="hidden" name="action" value="start">
+                                                    <button type="submit" class="btn btn-primary">🚀 Mark In Progress</button>
+                                                </form>
+                                                <form method="POST">
+                                                    <input type="hidden" name="booking_id" value="<?php echo $job['Booking_ID']; ?>">
+                                                    <input type="hidden" name="action" value="decline">
+                                                    <button type="submit" class="btn btn-secondary" style="border-color: rgba(239,68,68,0.4); color: #ef4444;">❌ Decline</button>
                                                 </form>
                                             <?php elseif ($status === 'in_progress'): ?>
-                                                <form method="POST" style="display: inline;">
+                                                <form method="POST">
                                                     <input type="hidden" name="booking_id" value="<?php echo $job['Booking_ID']; ?>">
-                                                    <input type="hidden" name="new_status" value="completed">
-                                                    <button type="submit" name="update_status" class="btn btn-success">
-                                                        ✅ Mark Complete
-                                                    </button>
+                                                    <input type="hidden" name="action" value="complete">
+                                                    <button type="submit" class="btn btn-success">✅ Mark Completed</button>
                                                 </form>
+                                            <?php elseif ($status === 'awaiting_confirmation'): ?>
+                                                <div class="btn btn-secondary" style="cursor: default;">⏳ Waiting for client confirmation</div>
                                             <?php endif; ?>
-                                            
+
                                             <a href="tel:<?php echo $job['Client_Phone']; ?>" class="btn btn-secondary">
                                                 📞 Call Client
                                             </a>
-                                            
                                             <a href="mailto:<?php echo $job['Client_Email']; ?>" class="btn btn-secondary">
                                                 📧 Send Email
                                             </a>

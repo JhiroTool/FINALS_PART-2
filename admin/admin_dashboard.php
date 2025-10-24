@@ -75,9 +75,34 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'admin') {
                 }
                 
                 try {
-                    $total_bookings = $conn->query("SELECT COUNT(*) as count FROM booking")->fetch_assoc()['count'];
-                } catch (Exception $e) {
+                    $booking_stats_query = $conn->query("SELECT Status, COUNT(*) as count FROM booking GROUP BY Status");
+                    $booking_status_counts = [
+                        'awaiting_acceptance' => 0,
+                        'pending' => 0,
+                        'assigned' => 0,
+                        'in_progress' => 0,
+                        'awaiting_confirmation' => 0,
+                        'completed' => 0,
+                        'cancelled' => 0
+                    ];
                     $total_bookings = 0;
+                    if ($booking_stats_query) {
+                        while ($row = $booking_stats_query->fetch_assoc()) {
+                            $statusKey = $row['Status'];
+                            $count = (int)$row['count'];
+                            $total_bookings += $count;
+                            if (isset($booking_status_counts[$statusKey])) {
+                                $booking_status_counts[$statusKey] = $count;
+                            }
+                        }
+                    }
+                    $open_bookings = $booking_status_counts['awaiting_acceptance'] + $booking_status_counts['pending'] + $booking_status_counts['assigned'];
+                    $workflow_in_progress = $booking_status_counts['in_progress'];
+                    $workflow_waiting_client = $booking_status_counts['awaiting_confirmation'];
+                    $completed_bookings = $booking_status_counts['completed'];
+                    $cancelled_bookings = $booking_status_counts['cancelled'];
+                } catch (Exception $e) {
+                    $total_bookings = $open_bookings = $workflow_in_progress = $workflow_waiting_client = $completed_bookings = $cancelled_bookings = 0;
                 }
 
                 try {
@@ -124,6 +149,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'admin') {
                     <div class="stat-info">
                         <h3><?php echo $total_bookings; ?></h3>
                         <p>Total Bookings</p>
+                        <span class="stat-subtitle"><?php echo $open_bookings; ?> awaiting assignment</span>
                     </div>
                 </div>
             </div>

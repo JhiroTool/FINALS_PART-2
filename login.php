@@ -4,6 +4,28 @@ include 'connection.php';
 
 $error = '';
 
+function isUserVerified($conn, $userId, $role)
+{
+    $stmt = $conn->prepare("SELECT Verified_At FROM user_verifications WHERE User_ID = ? AND Role = ? LIMIT 1");
+    if (!$stmt) {
+        return true;
+    }
+    $stmt->bind_param("is", $userId, $role);
+    $stmt->execute();
+    $stmt->store_result();
+    if ($stmt->num_rows === 0) {
+        $stmt->close();
+        return true;
+    }
+    $stmt->bind_result($verifiedAt);
+    $stmt->fetch();
+    $stmt->close();
+    if (empty($verifiedAt)) {
+        return false;
+    }
+    return true;
+}
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $email = trim($_POST['email']);
     $password = $_POST['password'];
@@ -21,12 +43,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $stmt_client->bind_result($id, $hashed_password, $firstname, $lastname);
             $stmt_client->fetch();
             if (password_verify($password, $hashed_password)) {
-                $_SESSION['user_id'] = $id;
-                $_SESSION['user_type'] = 'client';
-                $_SESSION['user_name'] = $firstname . ' ' . $lastname;
-                $_SESSION['email'] = $email;
-                header('Location: client/client_dashboard.php');
-                exit();
+                if (!isUserVerified($conn, $id, 'client')) {
+                    $verify_link = 'verify.php?email=' . urlencode($email) . '&role=client';
+                    $error = "Please verify your account before logging in. <a href='" . htmlspecialchars($verify_link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify now</a>.";
+                } else {
+                    $_SESSION['user_id'] = $id;
+                    $_SESSION['user_type'] = 'client';
+                    $_SESSION['user_name'] = $firstname . ' ' . $lastname;
+                    $_SESSION['email'] = $email;
+                    header('Location: client/client_dashboard.php');
+                    exit();
+                }
             } else {
                 $error = "Invalid password.";
             }
@@ -42,14 +69,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $stmt_tech->fetch();
                 if (password_verify($password, $hashed_password)) {
                     if ($status === 'approved') {
-                        $_SESSION['user_id'] = $id;
-                        $_SESSION['user_type'] = 'technician';
-                        $_SESSION['user_name'] = $firstname . ' ' . $lastname;
-                        $_SESSION['email'] = $email;
-                        header('Location: technician/technician_dashboard.php');
-                        exit();
+                        if (!isUserVerified($conn, $id, 'technician')) {
+                            $verify_link = 'verify.php?email=' . urlencode($email) . '&role=technician';
+                            $error = "Please verify your technician account using the 6-digit code sent to your email. <a href='" . htmlspecialchars($verify_link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify now</a>.";
+                        } else {
+                            $_SESSION['user_id'] = $id;
+                            $_SESSION['user_type'] = 'technician';
+                            $_SESSION['user_name'] = $firstname . ' ' . $lastname;
+                            $_SESSION['email'] = $email;
+                            header('Location: technician/technician_dashboard.php');
+                            exit();
+                        }
                     } else {
-                        $error = "Your technician account is pending approval. Please wait for admin verification.";
+                        if ($status === 'pending_verification') {
+                            $verify_link = 'verify.php?email=' . urlencode($email) . '&role=technician';
+                            $error = "Please verify your technician account using the 6-digit code sent to your email. <a href='" . htmlspecialchars($verify_link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify now</a>.";
+                        } else {
+                            $error = "Your technician account is pending approval. Please wait for admin verification.";
+                        }
                     }
                 } else {
                     $error = "Invalid password.";

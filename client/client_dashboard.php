@@ -74,8 +74,9 @@ if ($is_subscribed) {
 }
 
 // Initialize variables with default values
-$pending_requests = 0;
-$accepted_bookings = 0;
+$awaiting_acceptance_count = 0;
+$in_progress_count = 0;
+$awaiting_confirmation_count = 0;
 $completed_bookings = 0;
 $appliances_count = 0;
 $recent_bookings = null;
@@ -83,19 +84,26 @@ $available_techs = null;
 
 // Get client statistics
 try {
-    // Count pending service requests (waiting for technician to accept)
-    $pending_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status IN ('pending', 'assigned')");
-    $pending_stmt->bind_param("i", $user_id);
-    $pending_stmt->execute();
-    $pending_requests = $pending_stmt->get_result()->fetch_assoc()['count'];
-    $pending_stmt->close();
+    // Count awaiting acceptance requests (waiting for technician action)
+    $awaiting_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status IN ('awaiting_acceptance', 'pending', 'assigned')");
+    $awaiting_stmt->bind_param("i", $user_id);
+    $awaiting_stmt->execute();
+    $awaiting_acceptance_count = $awaiting_stmt->get_result()->fetch_assoc()['count'];
+    $awaiting_stmt->close();
 
-    // Count accepted/in-progress bookings
-    $accepted_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status IN ('assigned', 'in_progress')");
-    $accepted_stmt->bind_param("i", $user_id);
-    $accepted_stmt->execute();
-    $accepted_bookings = $accepted_stmt->get_result()->fetch_assoc()['count'];
-    $accepted_stmt->close();
+    // Count in-progress bookings
+    $progress_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status = 'in_progress'");
+    $progress_stmt->bind_param("i", $user_id);
+    $progress_stmt->execute();
+    $in_progress_count = $progress_stmt->get_result()->fetch_assoc()['count'];
+    $progress_stmt->close();
+
+    // Count bookings awaiting completion confirmation
+    $awaiting_confirm_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status = 'awaiting_confirmation'");
+    $awaiting_confirm_stmt->bind_param("i", $user_id);
+    $awaiting_confirm_stmt->execute();
+    $awaiting_confirmation_count = $awaiting_confirm_stmt->get_result()->fetch_assoc()['count'];
+    $awaiting_confirm_stmt->close();
 
     // Count completed bookings
     $completed_stmt = $conn->prepare("SELECT COUNT(*) as count FROM booking WHERE Client_ID = ? AND Status = 'completed'");
@@ -183,8 +191,9 @@ try {
                 <div class="user-section">
                     <div class="notification-bell">
                         <span class="bell-icon">🔔</span>
-                        <?php if (($pending_requests + $accepted_bookings) > 0): ?>
-                        <span class="notification-badge"><?php echo ($pending_requests + $accepted_bookings); ?></span>
+                        <?php $open_workflow_count = $awaiting_acceptance_count + $in_progress_count + $awaiting_confirmation_count; ?>
+                        <?php if ($open_workflow_count > 0): ?>
+                        <span class="notification-badge"><?php echo $open_workflow_count; ?></span>
                         <?php endif; ?>
                     </div>
                     
@@ -232,12 +241,16 @@ try {
                     
                     <div class="hero-stats">
                         <div class="hero-stat">
-                            <div class="stat-number"><?php echo $pending_requests; ?></div>
-                            <div class="stat-label">Pending Requests</div>
+                            <div class="stat-number"><?php echo $awaiting_acceptance_count; ?></div>
+                            <div class="stat-label">Awaiting Acceptance</div>
                         </div>
                         <div class="hero-stat">
-                            <div class="stat-number"><?php echo $accepted_bookings; ?></div>
-                            <div class="stat-label">Active Services</div>
+                            <div class="stat-number"><?php echo $in_progress_count; ?></div>
+                            <div class="stat-label">In Progress</div>
+                        </div>
+                        <div class="hero-stat">
+                            <div class="stat-number"><?php echo $awaiting_confirmation_count; ?></div>
+                            <div class="stat-label">Awaiting Confirmation</div>
                         </div>
                         <div class="hero-stat">
                             <div class="stat-number"><?php echo $completed_bookings; ?></div>
@@ -326,21 +339,30 @@ try {
                     <div class="status-card pending">
                         <div class="card-icon">⏳</div>
                         <div class="card-content">
-                            <h3><?php echo $pending_requests; ?></h3>
-                            <p>Pending Requests</p>
-                            <span class="card-trend">Waiting for technician</span>
+                            <h3><?php echo $awaiting_acceptance_count; ?></h3>
+                            <p>Awaiting Acceptance</p>
+                            <span class="card-trend">Technician review needed</span>
                         </div>
                     </div>
                     
                     <div class="status-card active">
                         <div class="card-icon">🔧</div>
                         <div class="card-content">
-                            <h3><?php echo $accepted_bookings; ?></h3>
-                            <p>Active Services</p>
-                            <span class="card-trend">Being worked on</span>
+                            <h3><?php echo $in_progress_count; ?></h3>
+                            <p>In Progress</p>
+                            <span class="card-trend">Being serviced</span>
                         </div>
                     </div>
                     
+                    <div class="status-card warning">
+                        <div class="card-icon">📝</div>
+                        <div class="card-content">
+                            <h3><?php echo $awaiting_confirmation_count; ?></h3>
+                            <p>Awaiting Confirmation</p>
+                            <span class="card-trend">Needs your approval</span>
+                        </div>
+                    </div>
+
                     <div class="status-card completed">
                         <div class="card-icon">✅</div>
                         <div class="card-content">

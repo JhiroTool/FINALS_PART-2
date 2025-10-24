@@ -1,6 +1,7 @@
 <?php
 session_start();
 include '../connection.php';
+require_once __DIR__ . '/../booking_workflow_helper.php';
 
 // Check if user is client
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'client') {
@@ -9,8 +10,26 @@ if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'client') {
 }
 
 $user_id = $_SESSION['user_id'];
+$message = '';
+$messageType = '';
 
-// Get client info
+function getWorkflowStatus(mysqli $conn, int $bookingId): array
+{
+    $workflow = getBookingWorkflow($conn, $bookingId);
+    if (!$workflow) {
+        return [
+            'technicianAccepted' => false,
+            'clientConfirmed' => false,
+            'technicianConfirmed' => false
+        ];
+    }
+    return [
+        'technicianAccepted' => (int)$workflow['Technician_Accepted'] === 1,
+        'clientConfirmed' => (int)$workflow['Client_Confirmed'] === 1,
+        'technicianConfirmed' => (int)$workflow['Technician_Confirmed'] === 1
+    ];
+}
+
 $stmt = $conn->prepare("SELECT Client_FN, Client_LN FROM client WHERE Client_ID = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
@@ -18,22 +37,52 @@ $result = $stmt->get_result();
 $client = $result->fetch_assoc();
 $stmt->close();
 
-// Handle AJAX requests for cancellation
-if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
-    $booking_id = intval($_POST['booking_id']);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
+        $booking_id = intval($_POST['booking_id']);
 
-    // Verify ownership and update status
-    header('Content-Type: application/json');
-    $cancel_stmt = $conn->prepare("UPDATE booking SET Status = 'cancelled' WHERE Booking_ID = ? AND Client_ID = ? AND Status IN ('pending','assigned')");
-    $cancel_stmt->bind_param("ii", $booking_id, $user_id);
+        header('Content-Type: application/json');
+        $cancel_stmt = $conn->prepare("UPDATE booking SET Status = 'cancelled' WHERE Booking_ID = ? AND Client_ID = ? AND Status IN ('pending','awaiting_acceptance','assigned')");
+        $cancel_stmt->bind_param("ii", $booking_id, $user_id);
 
-    if ($cancel_stmt->execute() && $cancel_stmt->affected_rows > 0) {
-        echo json_encode(['success' => true, 'message' => 'Booking cancelled successfully']);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Unable to cancel booking']);
+        if ($cancel_stmt->execute() && $cancel_stmt->affected_rows > 0) {
+            removeBookingWorkflow($conn, $booking_id);
+            echo json_encode(['success' => true, 'message' => 'Booking cancelled successfully']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Unable to cancel booking']);
+        }
+        $cancel_stmt->close();
+        exit();
     }
-    $cancel_stmt->close();
-    exit();
+
+    if (isset($_POST['action']) && $_POST['action'] === 'confirm_completion') {
+        $booking_id = intval($_POST['booking_id']);
+        header('Content-Type: application/json');
+
+        $stmt = $conn->prepare("SELECT Status FROM booking WHERE Booking_ID = ? AND Client_ID = ? LIMIT 1");
+        $stmt->bind_param('ii', $booking_id, $user_id);
+        $stmt->execute();
+        $stmt->bind_result($statusValue);
+        if (!$stmt->fetch()) {
+            echo json_encode(['success' => false, 'message' => 'Booking not found.']);
+            $stmt->close();
+            exit();
+        }
+        $stmt->close();
+
+        if (!in_array($statusValue, ['awaiting_acceptance', 'in_progress', 'awaiting_confirmation', 'assigned', 'pending'], true)) {
+            echo json_encode(['success' => false, 'message' => 'This booking is already resolved.']);
+            exit();
+        }
+
+        $result = markBookingConfirmation($conn, $booking_id, 'client');
+        if ($result['success']) {
+            echo json_encode(['success' => true, 'completed' => $result['completed']]);
+        } else {
+            echo json_encode(['success' => false, 'message' => $result['message'] ?? 'Unable to confirm completion.']);
+        }
+        exit();
+    }
 }
 ?>
 
@@ -117,8 +166,9 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                     // Get quick stats for hero
                     $stats_query = "
                         SELECT 
-                            SUM(CASE WHEN Status IN ('pending', 'assigned') THEN 1 ELSE 0 END) as pending_count,
-                            SUM(CASE WHEN Status = 'in_progress' THEN 1 ELSE 0 END) as progress_count,
+                            SUM(CASE WHEN Status IN ('awaiting_acceptance', 'pending', 'assigned') THEN 1 ELSE 0 END) as awaiting_acceptance_count,
+                            SUM(CASE WHEN Status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_count,
+                            SUM(CASE WHEN Status = 'awaiting_confirmation' THEN 1 ELSE 0 END) as awaiting_confirmation_count,
                             SUM(CASE WHEN Status = 'completed' THEN 1 ELSE 0 END) as completed_count,
                             COUNT(*) as total_count
                         FROM booking 
@@ -141,25 +191,34 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                 <span class="card-trend">All time</span>
                             </div>
                         </div>
-                        
+
                         <div class="status-card">
                             <div class="card-icon">⏳</div>
                             <div class="card-content">
-                                <h3><?php echo $stats['pending_count'] ?? 0; ?></h3>
-                                <p>Pending</p>
-                                <span class="card-trend">Awaiting assignment</span>
+                                <h3><?php echo $stats['awaiting_acceptance_count'] ?? 0; ?></h3>
+                                <p>Awaiting Acceptance</p>
+                                <span class="card-trend">Waiting for technician</span>
                             </div>
                         </div>
-                        
+
                         <div class="status-card">
                             <div class="card-icon">🔧</div>
                             <div class="card-content">
-                                <h3><?php echo $stats['progress_count'] ?? 0; ?></h3>
+                                <h3><?php echo $stats['in_progress_count'] ?? 0; ?></h3>
                                 <p>In Progress</p>
                                 <span class="card-trend">Being worked on</span>
                             </div>
                         </div>
-                        
+
+                        <div class="status-card">
+                            <div class="card-icon">📝</div>
+                            <div class="card-content">
+                                <h3><?php echo $stats['awaiting_confirmation_count'] ?? 0; ?></h3>
+                                <p>Awaiting Confirmation</p>
+                                <span class="card-trend">Need your approval</span>
+                            </div>
+                        </div>
+
                         <div class="status-card">
                             <div class="card-icon">✅</div>
                             <div class="card-content">
@@ -175,23 +234,30 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
             <!-- Bookings Sections -->
             <?php
             $statuses = [
-                'pending' => [
-                    'title' => 'Pending Requests', 
-                    'icon' => '⏳', 
+                'awaiting_acceptance' => [
+                    'title' => 'Awaiting Acceptance',
+                    'icon' => '⏳',
                     'class' => 'pending',
-                    'description' => 'Waiting for technician assignment',
-                    'filters' => ['pending', 'assigned']
+                    'description' => 'Waiting for a technician to accept your request',
+                    'filters' => ['awaiting_acceptance', 'pending', 'assigned']
                 ],
                 'in_progress' => [
-                    'title' => 'Services In Progress', 
-                    'icon' => '🔧', 
+                    'title' => 'Services In Progress',
+                    'icon' => '🔧',
                     'class' => 'progress',
                     'description' => 'Currently being worked on',
                     'filters' => ['in_progress']
                 ],
+                'awaiting_confirmation' => [
+                    'title' => 'Awaiting Confirmation',
+                    'icon' => '📝',
+                    'class' => 'progress',
+                    'description' => 'Technician marked this job done. Please confirm once you are satisfied.',
+                    'filters' => ['awaiting_confirmation']
+                ],
                 'completed' => [
-                    'title' => 'Completed Services', 
-                    'icon' => '✅', 
+                    'title' => 'Completed Services',
+                    'icon' => '✅',
                     'class' => 'completed',
                     'description' => 'Successfully finished repairs',
                     'filters' => ['completed']
@@ -218,32 +284,87 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                     $bookings_stmt->execute();
                     $bookings_result = $bookings_stmt->get_result();
                     $booking_count = $bookings_result->num_rows;
+
+                    $sectionThemes = [
+                        'awaiting_acceptance' => [
+                            'header_gradient' => 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                            'header_accent' => '#92400e',
+                            'badge_gradient' => 'linear-gradient(135deg, #f59e0b, #d97706)',
+                            'icon_background' => 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                            'icon_color' => '#92400e'
+                        ],
+                        'in_progress' => [
+                            'header_gradient' => 'linear-gradient(135deg, #dbeafe, #bfdbfe)',
+                            'header_accent' => '#1d4ed8',
+                            'badge_gradient' => 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                            'icon_background' => 'linear-gradient(135deg, #dbeafe, #bfdbfe)',
+                            'icon_color' => '#1d4ed8'
+                        ],
+                        'awaiting_confirmation' => [
+                            'header_gradient' => 'linear-gradient(135deg, #fff7ed, #fde68a)',
+                            'header_accent' => '#b45309',
+                            'badge_gradient' => 'linear-gradient(135deg, #facc15, #d97706)',
+                            'icon_background' => 'linear-gradient(135deg, #fff7ed, #fde68a)',
+                            'icon_color' => '#b45309'
+                        ],
+                        'completed' => [
+                            'header_gradient' => 'linear-gradient(135deg, #dcfce7, #bbf7d0)',
+                            'header_accent' => '#047857',
+                            'badge_gradient' => 'linear-gradient(135deg, #10b981, #059669)',
+                            'icon_background' => 'linear-gradient(135deg, #dcfce7, #bbf7d0)',
+                            'icon_color' => '#047857'
+                        ]
+                    ];
+
+                    $sectionTheme = $sectionThemes[$status] ?? $sectionThemes['completed'];
+
+                    $cardThemes = [
+                        'awaiting_acceptance' => ['icon_background' => 'linear-gradient(135deg, #fef3c7, #fde68a)', 'icon_color' => '#92400e'],
+                        'pending' => ['icon_background' => 'linear-gradient(135deg, #fef3c7, #fde68a)', 'icon_color' => '#92400e'],
+                        'assigned' => ['icon_background' => 'linear-gradient(135deg, #fef3c7, #fde68a)', 'icon_color' => '#92400e'],
+                        'in_progress' => ['icon_background' => 'linear-gradient(135deg, #dbeafe, #bfdbfe)', 'icon_color' => '#1d4ed8'],
+                        'awaiting_confirmation' => ['icon_background' => 'linear-gradient(135deg, #fff7ed, #fde68a)', 'icon_color' => '#b45309'],
+                        'completed' => ['icon_background' => 'linear-gradient(135deg, #dcfce7, #bbf7d0)', 'icon_color' => '#047857']
+                    ];
             ?>
                     <section class="marketplace-actions" style="margin-bottom: 3rem;">
-                        <div class="section-title-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border-left: 6px solid <?php echo $status === 'pending' ? '#f59e0b' : ($status === 'in_progress' ? '#3b82f6' : '#10b981'); ?>;">
+                        <div class="section-title-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border-left: 6px solid <?php echo $sectionTheme['header_accent']; ?>;">
                             <div>
                                 <h2 class="section-title">
-                                    <span class="title-icon" style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : ($status === 'in_progress' ? 'linear-gradient(135deg, #dbeafe, #bfdbfe)' : 'linear-gradient(135deg, #dcfce7, #bbf7d0)'); ?>; color: <?php echo $status === 'pending' ? '#92400e' : ($status === 'in_progress' ? '#1d4ed8' : '#047857'); ?>; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"><?php echo $config['icon']; ?></span>
+                                    <span class="title-icon" style="background: <?php echo $sectionTheme['icon_background']; ?>; color: <?php echo $sectionTheme['icon_color']; ?>; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                        <?php echo $config['icon']; ?>
+                                    </span>
                                     <?php echo $config['title']; ?>
                                 </h2>
-                                <p style="color: #64748b; margin-top: 0.5rem;"><?php echo $config['description']; ?></p>
+                                <p style="color: #64748b; margin-top: 0.5rem;">&ZeroWidthSpace;<?php echo $config['description']; ?></p>
                             </div>
                             <div style="text-align: center;">
-                                <div style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : ($status === 'in_progress' ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'linear-gradient(135deg, #10b981, #059669)'); ?>; color: white; padding: 12px 24px; border-radius: 20px; font-weight: 700; font-size: 1.1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                                <div style="background: <?php echo $sectionTheme['badge_gradient']; ?>; color: white; padding: 12px 24px; border-radius: 20px; font-weight: 700; font-size: 1.1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
                                     <?php echo $booking_count; ?> service<?php echo $booking_count !== 1 ? 's' : ''; ?>
                                 </div>
                             </div>
                         </div>
-
                         <?php if ($booking_count > 0): ?>
                             <div class="action-marketplace">
                                 <?php while ($booking = $bookings_result->fetch_assoc()): ?>
-                                    <div class="action-item <?php echo $status === 'pending' ? 'featured' : ''; ?>" data-booking-id="<?php echo $booking['Booking_ID']; ?>">
-                                        <?php if ($status === 'pending'): ?>
-                                            <div class="action-badge">Urgent</div>
+                                    <?php
+                                    $workflow = getWorkflowStatus($conn, (int) $booking['Booking_ID']);
+                                    $technicianAccepted = $workflow['technicianAccepted'];
+                                    $clientConfirmed = $workflow['clientConfirmed'];
+                                    $technicianConfirmed = $workflow['technicianConfirmed'];
+                                    $currentStatus = $booking['Status'];
+                                    ?>
+                                    <?php $cardTheme = $cardThemes[$currentStatus] ?? $cardThemes['completed']; ?>
+                                    <div class="action-item <?php echo $status === 'awaiting_acceptance' ? 'featured' : ''; ?>" data-booking-id="<?php echo $booking['Booking_ID']; ?>">
+                                        <?php if ($currentStatus === 'awaiting_acceptance'): ?>
+                                            <div class="action-badge">Awaiting technician</div>
+                                        <?php elseif ($currentStatus === 'in_progress'): ?>
+                                            <div class="action-badge" style="background: #dbeafe; color: #1d4ed8;">In progress</div>
+                                        <?php elseif ($currentStatus === 'awaiting_confirmation'): ?>
+                                            <div class="action-badge" style="background: #fef3c7; color: #92400e;">Action needed</div>
                                         <?php endif; ?>
                                         
-                                        <div class="action-icon" style="background: <?php echo $status === 'pending' ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : ($status === 'in_progress' ? 'linear-gradient(135deg, #dbeafe, #bfdbfe)' : 'linear-gradient(135deg, #dcfce7, #bbf7d0)'); ?>; color: <?php echo $status === 'pending' ? '#92400e' : ($status === 'in_progress' ? '#1d4ed8' : '#047857'); ?>;">
+                                        <div class="action-icon" style="background: <?php echo $cardTheme['icon_background']; ?>; color: <?php echo $cardTheme['icon_color']; ?>;">
                                             <?php echo $config['icon']; ?>
                                         </div>
                                         
@@ -288,6 +409,32 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                                 </div>
                                             <?php endif; ?>
 
+                                            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                                <?php if ($currentStatus === 'awaiting_acceptance'): ?>
+                                                    <div style="background: rgba(245, 158, 11, 0.12); border-radius: 10px; padding: 0.75rem 1rem; color: #92400e; font-weight: 600;">
+                                                        <?php echo $technicianAccepted ? 'Technician accepted. Waiting for admin confirmation.' : 'Waiting for the technician to accept this job.'; ?>
+                                                    </div>
+                                                <?php elseif ($currentStatus === 'in_progress'): ?>
+                                                    <div style="background: rgba(56, 189, 248, 0.12); border-radius: 10px; padding: 0.75rem 1rem; color: #0c4a6e; font-weight: 600;">
+                                                        <?php echo $technicianAccepted ? 'Technician has accepted and is currently working on this service.' : 'Technician is scheduled—awaiting acceptance confirmation.'; ?>
+                                                    </div>
+                                                <?php elseif ($currentStatus === 'awaiting_confirmation'): ?>
+                                                    <div style="background: rgba(250, 204, 21, 0.15); border-radius: 10px; padding: 0.75rem 1rem; color: #854d0e; font-weight: 600;">
+                                                        <?php if ($clientConfirmed): ?>
+                                                            You already confirmed completion. Waiting for system update.
+                                                        <?php elseif ($technicianConfirmed): ?>
+                                                            Technician confirmed the job is done. Please review and confirm completion.
+                                                        <?php else: ?>
+                                                            Waiting for both you and the technician to confirm completion.
+                                                        <?php endif; ?>
+                                                    </div>
+                                                <?php elseif ($currentStatus === 'completed'): ?>
+                                                    <div style="background: rgba(16, 185, 129, 0.12); border-radius: 10px; padding: 0.75rem 1rem; color: #047857; font-weight: 600;">
+                                                        Service successfully marked as completed by both sides.
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+
                                             <?php if ($status === 'completed' && !empty($booking['JobPayment_ID'])): ?>
                                                 <div style="background: rgba(16, 185, 129, 0.1); padding: 0.75rem; border-radius: 8px; margin: 1rem 0; border-left: 3px solid #10b981; color: #047857;">
                                                     <strong>💳 Payment Settled:</strong>
@@ -310,7 +457,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                         </div>
                                         
                                         <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.5rem;">
-                                            <?php if (in_array($booking['Status'], ['pending', 'assigned'], true)): ?>
+                                            <?php if (in_array($currentStatus, ['awaiting_acceptance', 'pending', 'assigned'], true)): ?>
                                                 <button class="action-btn" style="background: linear-gradient(135deg, #ef4444, #dc2626);" onclick="cancelBooking(<?php echo $booking['Booking_ID']; ?>)">
                                                     ❌ Cancel Request
                                                 </button>
@@ -322,10 +469,20 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                                                 </a>
                                             <?php endif; ?>
 
-                                            <?php if ($status === 'in_progress'): ?>
+                                            <?php if ($currentStatus === 'in_progress'): ?>
                                                 <button class="action-btn" style="background: linear-gradient(135deg, #f59e0b, #d97706);" onclick="trackService(<?php echo $booking['Booking_ID']; ?>)">
                                                     📍 Track Progress
                                                 </button>
+                                            <?php endif; ?>
+
+                                            <?php if ($currentStatus === 'awaiting_confirmation' && !$clientConfirmed): ?>
+                                                <button class="action-btn" style="background: linear-gradient(135deg, #22c55e, #15803d);" onclick="confirmCompletion(<?php echo $booking['Booking_ID']; ?>)">
+                                                    ✅ Confirm Completion
+                                                </button>
+                                            <?php elseif ($currentStatus === 'awaiting_confirmation' && $clientConfirmed): ?>
+                                                <div class="action-btn" style="background: linear-gradient(135deg, #22c55e, #16a34a); cursor: default;">
+                                                    ✅ You confirmed completion
+                                                </div>
                                             <?php endif; ?>
 
                                             <?php if ($status === 'completed' && empty($booking['JobPayment_ID'])): ?>
@@ -748,6 +905,55 @@ if (isset($_POST['action']) && $_POST['action'] === 'cancel_booking') {
                 cancelBtn.disabled = false;
                 cancelBtn.innerHTML = '❌ Cancel Request';
                 cancelBtn.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+            }
+        }
+
+        async function confirmCompletion(bookingId) {
+            const card = document.querySelector(`[data-booking-id="${bookingId}"]`);
+            if (!card) {
+                showNotification('❌ Unable to locate this booking card.', 'error');
+                return;
+            }
+
+            if (!confirm('✅ Confirm this service is complete?\n\nOnly do this after verifying the work has been finished to your satisfaction.')) {
+                return;
+            }
+
+            const confirmBtn = card.querySelector('button[onclick*="confirmCompletion"]');
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '⏳ Sending confirmation...';
+                confirmBtn.style.background = 'linear-gradient(135deg, #94a3b8, #64748b)';
+            }
+
+            try {
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: `action=confirm_completion&booking_id=${encodeURIComponent(bookingId)}`
+                });
+
+                if (!response.ok) {
+                    throw new Error('Server error while confirming.');
+                }
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.message || 'Confirmation failed.');
+                }
+
+                showNotification(result.completed ? '🎉 Service completed! Thank you for confirming.' : '👍 Confirmation saved. Awaiting technician update.', 'success');
+
+                setTimeout(() => window.location.reload(), 1000);
+            } catch (error) {
+                showNotification(`❌ ${error.message}`, 'error');
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = '✅ Confirm Completion';
+                    confirmBtn.style.background = 'linear-gradient(135deg, #22c55e, #15803d)';
+                }
             }
         }
 

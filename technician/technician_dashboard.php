@@ -85,15 +85,16 @@ if (!$subscription_message && $is_subscribed) {
 
 // Get stats
 try {
-    $pending_bookings = $conn->query("SELECT COUNT(*) as count FROM booking WHERE Technician_ID = {$user_id} AND Status = 'assigned'")->fetch_assoc()['count'];
-    $completed_jobs = $conn->query("SELECT COUNT(*) as count FROM booking WHERE Technician_ID = {$user_id} AND Status = 'completed'")->fetch_assoc()['count'];
+    $awaiting_acceptance_jobs = $conn->query("SELECT COUNT(*) as count FROM booking WHERE Technician_ID = {$user_id} AND Status IN ('awaiting_acceptance', 'pending', 'assigned')")->fetch_assoc()['count'];
     $in_progress_jobs = $conn->query("SELECT COUNT(*) as count FROM booking WHERE Technician_ID = {$user_id} AND Status = 'in_progress'")->fetch_assoc()['count'];
-    
+    $awaiting_confirmation_jobs = $conn->query("SELECT COUNT(*) as count FROM booking WHERE Technician_ID = {$user_id} AND Status = 'awaiting_confirmation'")->fetch_assoc()['count'];
+    $completed_jobs = $conn->query("SELECT COUNT(*) as count FROM booking WHERE Technician_ID = {$user_id} AND Status = 'completed'")->fetch_assoc()['count'];
+
     // Get unread message count
     $unread_query = $conn->query("SELECT COUNT(*) as count FROM messages WHERE Receiver_ID = {$user_id} AND Receiver_Type = 'technician' AND Is_Read = 0");
     $unread_count = $unread_query ? $unread_query->fetch_assoc()['count'] : 0;
 } catch (Exception $e) {
-    $pending_bookings = $completed_jobs = $in_progress_jobs = $unread_count = 0;
+    $awaiting_acceptance_jobs = $awaiting_confirmation_jobs = $completed_jobs = $in_progress_jobs = $unread_count = 0;
 }
 
 $rating = $technician['Ratings'] ?: '0.0';
@@ -137,8 +138,9 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                 <div class="user-section">
                     <div class="notification-bell">
                         <span class="bell-icon">🔔</span>
-                        <?php if ($pending_bookings > 0 || $unread_count > 0): ?>
-                        <span class="notification-badge"><?php echo $pending_bookings + $unread_count; ?></span>
+                        <?php $open_job_count = $awaiting_acceptance_jobs + $in_progress_jobs + $awaiting_confirmation_jobs; ?>
+                        <?php if ($open_job_count > 0 || $unread_count > 0): ?>
+                        <span class="notification-badge"><?php echo $open_job_count + $unread_count; ?></span>
                         <?php endif; ?>
                     </div>
                     
@@ -302,8 +304,8 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                 <div class="stat-card pending">
                     <div class="stat-icon">📋</div>
                     <div class="stat-info">
-                        <h3><?php echo $pending_bookings; ?></h3>
-                        <p>New Assignments</p>
+                        <h3><?php echo $awaiting_acceptance_jobs; ?></h3>
+                        <p>Awaiting Acceptance</p>
                     </div>
                 </div>
                 
@@ -315,6 +317,14 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                     </div>
                 </div>
                 
+                <div class="stat-card warning">
+                    <div class="stat-icon">📝</div>
+                    <div class="stat-info">
+                        <h3><?php echo $awaiting_confirmation_jobs; ?></h3>
+                        <p>Awaiting Confirmation</p>
+                    </div>
+                </div>
+
                 <div class="stat-card success">
                     <div class="stat-icon">✅</div>
                     <div class="stat-info">
@@ -322,7 +332,7 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                         <p>Completed Jobs</p>
                     </div>
                 </div>
-                
+
                 <div class="stat-card warning">
                     <div class="stat-icon">💰</div>
                     <div class="stat-info">
@@ -345,8 +355,8 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                         <div class="action-content">
                             <h3>View Jobs</h3>
                             <p>Check assigned jobs and update status</p>
-                            <?php if ($pending_bookings > 0): ?>
-                                <span class="action-badge"><?php echo $pending_bookings; ?> new</span>
+                            <?php if ($open_job_count > 0): ?>
+                                <span class="action-badge"><?php echo $open_job_count; ?> open</span>
                             <?php endif; ?>
                         </div>
                         <div class="action-arrow">→</div>

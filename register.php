@@ -1,8 +1,65 @@
 <?php
+require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/email_config.php';
 include 'connection.php';
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception as PHPMailerException;
 
 $success = '';
 $error = '';
+
+function sendVerificationEmail($recipientEmail, $recipientName, $code)
+{
+    try {
+        $mail = new PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host = EMAIL_SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = EMAIL_SMTP_USERNAME;
+        $mail->Password = EMAIL_SMTP_PASSWORD;
+        $mail->SMTPSecure = EMAIL_SMTP_SECURE;
+        $mail->Port = EMAIL_SMTP_PORT;
+        $mail->CharSet = EMAIL_CHARSET;
+        $mail->Encoding = EMAIL_ENCODING;
+        $displayName = trim($recipientName) !== '' ? $recipientName : 'PinoyFix Member';
+        $mail->setFrom(EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME);
+        $mail->addReplyTo(EMAIL_REPLY_TO_ADDRESS, EMAIL_FROM_NAME);
+        $mail->addAddress($recipientEmail, $displayName);
+        $mail->isHTML(true);
+        $mail->Subject = 'PinoyFix Verification Code';
+        $bodyName = htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8');
+        $bodyCode = htmlspecialchars($code, ENT_QUOTES, 'UTF-8');
+        $mail->Body = '<p>Hi ' . $bodyName . ',</p><p>Your verification code is <strong>' . $bodyCode . '</strong>.</p><p>This code will expire in 60 minutes.</p>';
+        $mail->AltBody = 'Your verification code is ' . $code . '. It expires in 60 minutes.';
+        $mail->send();
+        return true;
+    } catch (PHPMailerException $e) {
+        error_log('PHPMailer error: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function ensureVerificationStorage($conn)
+{
+    $createSql = "CREATE TABLE IF NOT EXISTS user_verifications (Verification_ID INT AUTO_INCREMENT PRIMARY KEY, User_ID INT NOT NULL, Role ENUM('client','technician') NOT NULL, Code VARCHAR(6) NOT NULL, Expires_At DATETIME NOT NULL, Verified_At DATETIME DEFAULT NULL, Created_At TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uniq_user_role (User_ID, Role)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    $conn->query($createSql);
+}
+
+function saveVerificationCode($conn, $userId, $role, $code, $expiresAt)
+{
+    ensureVerificationStorage($conn);
+    $stmt_delete = $conn->prepare("DELETE FROM user_verifications WHERE User_ID = ? AND Role = ?");
+    $stmt_delete->bind_param("is", $userId, $role);
+    $stmt_delete->execute();
+    $stmt_delete->close();
+    $stmt_insert = $conn->prepare("INSERT INTO user_verifications (User_ID, Role, Code, Expires_At) VALUES (?, ?, ?, ?)");
+    $stmt_insert->bind_param("isss", $userId, $role, $code, $expiresAt);
+    if (!$stmt_insert->execute()) {
+        throw new \Exception('Failed to save verification code.');
+    }
+    $stmt_insert->close();
+}
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $firstname = trim($_POST['firstname']);
@@ -57,46 +114,56 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $address_id = $stmt_addr->insert_id;
                 $stmt_addr->close();
                 
+                $verification_code = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+                $expires_at = date('Y-m-d H:i:s', time() + 3600);
+                $full_name = trim($firstname . ' ' . $lastname);
                 if ($role === 'technician') {
-                    // Insert into technician table
-                    $status = 'pending';
+                    $status = 'pending_verification';
                     $ratings = '0.0';
-                    
                     $stmt_tech = $conn->prepare("INSERT INTO technician (Technician_FN, Technician_LN, Technician_Email, Technician_Pass, Technician_Phone, Specialization, Service_Pricing, Service_Location, Status, Ratings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                     $stmt_tech->bind_param("ssssssssss", $firstname, $lastname, $email, $hashed_password, $phone, $specialization, $service_pricing, $service_location, $status, $ratings);
-                    $stmt_tech->execute();
+                    if (!$stmt_tech->execute()) {
+                        throw new \Exception('Failed to create technician.');
+                    }
                     $user_id = $stmt_tech->insert_id;
                     $stmt_tech->close();
-                    
-                    // Link technician with address
                     $stmt_tech_addr = $conn->prepare("INSERT INTO technician_address (Technician_ID, Address_ID) VALUES (?, ?)");
                     $stmt_tech_addr->bind_param("ii", $user_id, $address_id);
-                    $stmt_tech_addr->execute();
+                    if (!$stmt_tech_addr->execute()) {
+                        throw new \Exception('Failed to link technician address.');
+                    }
                     $stmt_tech_addr->close();
-                    
+                    saveVerificationCode($conn, $user_id, 'technician', $verification_code, $expires_at);
                 } else {
-                    // Insert into client table
                     $stmt_client = $conn->prepare("INSERT INTO client (Client_FN, Client_LN, Client_Email, Client_Pass, Client_Phone) VALUES (?, ?, ?, ?, ?)");
                     $stmt_client->bind_param("sssss", $firstname, $lastname, $email, $hashed_password, $phone);
-                    $stmt_client->execute();
+                    if (!$stmt_client->execute()) {
+                        throw new \Exception('Failed to create client.');
+                    }
                     $user_id = $stmt_client->insert_id;
                     $stmt_client->close();
-                    
-                    // Link client with address
                     $stmt_client_addr = $conn->prepare("INSERT INTO client_address (Client_ID, Address_ID) VALUES (?, ?)");
                     $stmt_client_addr->bind_param("ii", $user_id, $address_id);
-                    $stmt_client_addr->execute();
+                    if (!$stmt_client_addr->execute()) {
+                        throw new \Exception('Failed to link client address.');
+                    }
                     $stmt_client_addr->close();
+                    saveVerificationCode($conn, $user_id, 'client', $verification_code, $expires_at);
                 }
-                
                 $conn->commit();
-                $success = "Registration successful! You can now <a href='login.php' style='color: #0038A8; text-decoration: none; font-weight: 600;'>login here</a>.";
+                $email_sent = sendVerificationEmail($email, $full_name, $verification_code);
+                if ($email_sent) {
+                    $link = 'verify.php?email=' . urlencode($email) . '&role=' . urlencode($role);
+                    $success = "Registration successful! A 6-digit verification code was sent to " . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') . ". <a href='" . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify your account</a>.";
+                } else {
+                    $error = "Registration saved, but the verification email could not be sent. Please contact support to request a new code.";
+                }
             }
             
             $stmt_check_client->close();
             $stmt_check_tech->close();
             
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             $conn->rollback();
             $error = "Registration failed. Please try again.";
         }
