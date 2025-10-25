@@ -16,14 +16,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $technician_id = $_POST['technician_id'];
     $action = $_POST['action'];
     
-    if ($action == 'approve') {
-        $stmt = $conn->prepare("UPDATE technician SET Status = 'approved' WHERE Technician_ID = ?");
+        if ($action == 'approve') {
+        $stmt = $conn->prepare("UPDATE technician SET Status = 'approved' WHERE Technician_ID = ? AND Tech_Certificate IS NOT NULL AND Tech_Certificate != ''");
         $stmt->bind_param("i", $technician_id);
-        if ($stmt->execute()) {
+        $stmt->execute();
+        if ($stmt->affected_rows > 0) {
             $message = "Technician approved successfully!";
             $messageType = "success";
         } else {
-            $message = "Error approving technician.";
+            $message = "Unable to approve technician. Ensure a certificate is on file.";
             $messageType = "error";
         }
         $stmt->close();
@@ -46,8 +47,8 @@ $pending_query = "SELECT t.*, a.Street, a.Barangay, a.City, a.Province
                   FROM technician t 
                   LEFT JOIN technician_address ta ON t.Technician_ID = ta.Technician_ID 
                   LEFT JOIN address a ON ta.Address_ID = a.Address_ID 
-                  WHERE t.Status = 'pending' 
-                  ORDER BY t.Technician_ID DESC";
+                  WHERE t.Status IN ('pending', 'pending_verification', 'pending_certificate', 'pending_review') 
+                  ORDER BY FIELD(t.Status, 'pending_verification', 'pending_certificate', 'pending_review', 'pending'), t.Technician_ID DESC";
 $pending_result = $conn->query($pending_query);
 
 // Get approved technicians
@@ -126,7 +127,16 @@ $approved_result = $conn->query($approved_query);
                                         <p class="tech-email"><?php echo htmlspecialchars($tech['Technician_Email']); ?></p>
                                         <p class="tech-phone"><?php echo htmlspecialchars($tech['Technician_Phone']); ?></p>
                                     </div>
-                                    <div class="status-badge status-pending">Pending</div>
+                                    <?php
+                                    $status_label = ucfirst(str_replace('_', ' ', $tech['Status']));
+                                    $status_class = 'status-pending';
+                                    if ($tech['Status'] === 'pending_review') {
+                                        $status_class = 'status-review';
+                                    } elseif ($tech['Status'] === 'pending_certificate' || $tech['Status'] === 'pending_verification') {
+                                        $status_class = 'status-warning';
+                                    }
+                                    ?>
+                                    <div class="status-badge <?php echo $status_class; ?>"><?php echo htmlspecialchars($status_label); ?></div>
                                 </div>
 
                                 <div class="card-body">
@@ -156,13 +166,23 @@ $approved_result = $conn->query($approved_query);
                                             ?>
                                         </span>
                                     </div>
+                                    <div class="info-row">
+                                        <span class="label">Certificate:</span>
+                                        <span class="value">
+                                            <?php if (!empty($tech['Tech_Certificate'])): ?>
+                                                <a href="../uploads/certificates/<?php echo htmlspecialchars($tech['Tech_Certificate']); ?>" target="_blank">View certificate</a>
+                                            <?php else: ?>
+                                                <em>No certificate uploaded</em>
+                                            <?php endif; ?>
+                                        </span>
+                                    </div>
                                 </div>
 
                                 <div class="card-actions">
                                     <form method="POST" style="display: inline;">
                                         <input type="hidden" name="technician_id" value="<?php echo $tech['Technician_ID']; ?>">
                                         <input type="hidden" name="action" value="approve">
-                                        <button type="submit" class="btn-approve" onclick="return confirm('Are you sure you want to approve this technician?')">
+                                        <button type="submit" class="btn-approve" <?php echo empty($tech['Tech_Certificate']) ? 'disabled title="Upload required"' : ''; ?> onclick="return confirm('Are you sure you want to approve this technician?')">
                                             ✓ Approve
                                         </button>
                                     </form>

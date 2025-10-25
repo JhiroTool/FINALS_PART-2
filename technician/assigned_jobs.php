@@ -13,6 +13,20 @@ $user_id = $_SESSION['user_id'];
 $message = '';
 $messageType = '';
 
+$certificate_stmt = $conn->prepare("SELECT Tech_Certificate FROM technician WHERE Technician_ID = ? LIMIT 1");
+if ($certificate_stmt) {
+    $certificate_stmt->bind_param('i', $user_id);
+    $certificate_stmt->execute();
+    $certificate_stmt->bind_result($techCertificate);
+    $certificate_stmt->fetch();
+    $certificate_stmt->close();
+
+    if (empty($techCertificate)) {
+        header("Location: verify_certification.php?redirect=jobs");
+        exit();
+    }
+}
+
 function ensureTechnicianOwnsBooking(mysqli $conn, int $bookingId, int $technicianId): bool
 {
     $stmt = $conn->prepare("SELECT Booking_ID FROM booking WHERE Booking_ID = ? AND Technician_ID = ? LIMIT 1");

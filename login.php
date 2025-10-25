@@ -68,24 +68,44 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $stmt_tech->bind_result($id, $hashed_password, $firstname, $lastname, $status);
                 $stmt_tech->fetch();
                 if (password_verify($password, $hashed_password)) {
-                    if ($status === 'approved') {
-                        if (!isUserVerified($conn, $id, 'technician')) {
-                            $verify_link = 'verify.php?email=' . urlencode($email) . '&role=technician';
-                            $error = "Please verify your technician account using the 6-digit code sent to your email. <a href='" . htmlspecialchars($verify_link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify now</a>.";
-                        } else {
-                            $_SESSION['user_id'] = $id;
-                            $_SESSION['user_type'] = 'technician';
-                            $_SESSION['user_name'] = $firstname . ' ' . $lastname;
-                            $_SESSION['email'] = $email;
-                            header('Location: technician/technician_dashboard.php');
-                            exit();
-                        }
+                    $is_verified = isUserVerified($conn, $id, 'technician');
+
+                    if (!$is_verified) {
+                        $verify_link = 'verify.php?email=' . urlencode($email) . '&role=technician';
+                        $error = "Please verify your technician account using the 6-digit code sent to your email. <a href='" . htmlspecialchars($verify_link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify now</a>.";
                     } else {
-                        if ($status === 'pending_verification') {
-                            $verify_link = 'verify.php?email=' . urlencode($email) . '&role=technician';
-                            $error = "Please verify your technician account using the 6-digit code sent to your email. <a href='" . htmlspecialchars($verify_link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify now</a>.";
-                        } else {
-                            $error = "Your technician account is pending approval. Please wait for admin verification.";
+                        switch ($status) {
+                            case 'approved':
+                                $_SESSION['user_id'] = $id;
+                                $_SESSION['user_type'] = 'technician';
+                                $_SESSION['user_name'] = $firstname . ' ' . $lastname;
+                                $_SESSION['email'] = $email;
+                                header('Location: technician/technician_dashboard.php');
+                                exit();
+                            case 'pending_certificate':
+                                $_SESSION['user_id'] = $id;
+                                $_SESSION['user_type'] = 'technician';
+                                $_SESSION['user_name'] = $firstname . ' ' . $lastname;
+                                $_SESSION['email'] = $email;
+                                header('Location: technician/verify_certification.php');
+                                exit();
+                            case 'pending_review':
+                                $_SESSION['user_id'] = $id;
+                                $_SESSION['user_type'] = 'technician';
+                                $_SESSION['user_name'] = $firstname . ' ' . $lastname;
+                                $_SESSION['email'] = $email;
+                                header('Location: technician/technician_dashboard.php');
+                                exit();
+                            case 'pending_verification':
+                                $verify_link = 'verify.php?email=' . urlencode($email) . '&role=technician';
+                                $error = "Please verify your technician account using the 6-digit code sent to your email. <a href='" . htmlspecialchars($verify_link, ENT_QUOTES, 'UTF-8') . "' style='color: #0038A8; text-decoration: none; font-weight: 600;'>Verify now</a>.";
+                                break;
+                            case 'rejected':
+                                $error = "Your technician account was rejected. Please contact support for assistance.";
+                                break;
+                            default:
+                                $error = "Your technician account is pending admin review.";
+                                break;
                         }
                     }
                 } else {

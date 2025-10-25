@@ -570,7 +570,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="service_pricing">Service Rate (₱/hour)</label>
+                            <label for="service_pricing">Service rate</label>
                             <input type="number" id="service_pricing" name="service_pricing" placeholder="500" min="100" max="5000" step="50">
                         </div>
                     </div>

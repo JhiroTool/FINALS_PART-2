@@ -57,6 +57,11 @@ if (!$technician) {
     exit();
 }
 
+if (empty($technician['Tech_Certificate'])) {
+    header("Location: verify_certification.php?redirect=dashboard");
+    exit();
+}
+
 $is_subscribed = isSubscriptionActive((int)($technician['Is_Subscribed'] ?? 0), $technician['Subscription_Expires'] ?? null);
 $subscription_expiry = ($technician['Subscription_Expires'] && $technician['Subscription_Expires'] !== '0000-00-00 00:00:00')
     ? date('M j, Y', strtotime($technician['Subscription_Expires']))

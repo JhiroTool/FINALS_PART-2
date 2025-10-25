@@ -70,7 +70,7 @@ function markUserVerified($conn, $userId, $role)
     $stmt->close();
 
     if ($role === 'technician') {
-        $update = $conn->prepare("UPDATE technician SET Status = 'approved' WHERE Technician_ID = ?");
+        $update = $conn->prepare("UPDATE technician SET Status = CASE WHEN Status IN ('approved', 'pending') THEN Status ELSE 'pending_certificate' END WHERE Technician_ID = ?");
         $update->bind_param("i", $userId);
         $update->execute();
         $update->close();

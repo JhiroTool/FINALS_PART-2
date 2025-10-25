@@ -13,7 +13,7 @@ $message = '';
 $messageType = '';
 
 // Get current technician data
-$stmt = $conn->prepare("SELECT Technician_FN, Technician_LN, Tech_Certificate FROM technician WHERE Technician_ID = ?");
+$stmt = $conn->prepare("SELECT Technician_FN, Technician_LN, Tech_Certificate, Status FROM technician WHERE Technician_ID = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -42,10 +42,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
                 
                 // Update database
-                $update_stmt = $conn->prepare("UPDATE technician SET Tech_Certificate = ? WHERE Technician_ID = ?");
+                $current_status = $technician['Status'] ?? '';
+                $update_stmt = $conn->prepare("UPDATE technician SET Tech_Certificate = ?, Status = CASE WHEN Status IN ('approved', 'rejected') THEN Status ELSE 'pending_review' END WHERE Technician_ID = ?");
                 $update_stmt->bind_param("si", $new_filename, $user_id);
                 
                 if ($update_stmt->execute()) {
+                    if (!in_array($current_status, ['approved', 'rejected'], true)) {
+                        $technician['Status'] = 'pending_review';
+                    }
                     $message = "Certificate uploaded successfully! It will be reviewed by our admin team.";
                     $messageType = "success";
                     $technician['Tech_Certificate'] = $new_filename;
@@ -91,6 +95,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <h1 class="brand-title">PinoyFix</h1>
                         <p class="subtitle">Certificate Verification</p>
                     </div>
+                </div>
+                <div class="status-banner">
+                    <?php
+                    $status = $technician['Status'] ?? '';
+                    switch ($status) {
+                        case 'approved':
+                            echo '<div class="status approved">✅ Your documents are verified. You are fully approved for bookings.</div>';
+                            break;
+                        case 'pending_review':
+                            echo '<div class="status pending">⏳ Certificate under admin review. You will be notified once approved.</div>';
+                            break;
+                        case 'pending_certificate':
+                            echo '<div class="status alert">⚠️ Upload your certificate to continue the approval process.</div>';
+                            break;
+                        case 'rejected':
+                            echo '<div class="status rejected">❌ Your application was rejected. Please contact support for next steps.</div>';
+                            break;
+                        default:
+                            echo '<div class="status info">ℹ️ Complete the steps below to finish your technician verification.</div>';
+                    }
+                    ?>
                 </div>
                 <div class="header-actions">
                     <a href="technician_dashboard.php" class="btn-secondary">← Back to Dashboard</a>
