@@ -49,69 +49,76 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['booking_id'], $_POST['
         $message = "Booking not found or already reassigned.";
         $messageType = "error";
     } else {
-        switch ($action) {
-            case 'accept':
-                if (markTechnicianAcceptance($conn, $booking_id, $user_id)) {
-                    $message = "Booking accepted!";
-                    $messageType = "success";
-                } else {
-                    $message = "Unable to accept booking. It may have been updated.";
-                    $messageType = "error";
-                }
-                break;
-            case 'decline':
-                if (resetBookingToPending($conn, $booking_id)) {
-                    $message = "Booking returned to the queue.";
-                    $messageType = "success";
-                } else {
-                    $message = "Unable to decline booking.";
-                    $messageType = "error";
-                }
-                break;
-            case 'start':
-                $stmt = $conn->prepare("UPDATE booking SET Status = 'in_progress' WHERE Booking_ID = ? AND Technician_ID = ? AND Status IN ('assigned','awaiting_acceptance','pending')");
-                if ($stmt) {
-                    $stmt->bind_param('ii', $booking_id, $user_id);
-                    $stmt->execute();
-                    if ($stmt->affected_rows > 0) {
-                        $message = "Job marked as in progress.";
+        $busy_with_other = technicianHasPendingBooking($conn, $user_id, $booking_id);
+
+        if (in_array($action, ['accept', 'start'], true) && $busy_with_other) {
+            $message = "⚠️ You already have an active job in progress. Finish or hand it off before accepting a new one.";
+            $messageType = "error";
+        } else {
+            switch ($action) {
+                case 'accept':
+                    if (markTechnicianAcceptance($conn, $booking_id, $user_id)) {
+                        $message = "Booking accepted!";
                         $messageType = "success";
                     } else {
-                        $message = "Unable to update status.";
+                        $message = "Unable to accept booking. It may have been updated.";
                         $messageType = "error";
                     }
-                    $stmt->close();
-                }
-                break;
-            case 'complete':
-                $result = markBookingConfirmation($conn, $booking_id, 'technician');
-                if ($result['success']) {
-                    $statusAfter = $result['status'] ?? '';
-                    if ($result['completed'] && $statusAfter === 'completed') {
-                        $message = "Job completed!";
-                    } elseif ($statusAfter === 'awaiting_payment') {
-                        $message = "Both sides confirmed. Waiting for the client to settle payment.";
-                    } elseif ($statusAfter === 'awaiting_payout') {
-                        $message = "Client reported payment. Confirm once you receive it.";
+                    break;
+                case 'decline':
+                    if (resetBookingToPending($conn, $booking_id)) {
+                        $message = "Booking returned to the queue.";
+                        $messageType = "success";
                     } else {
-                        $message = "Marked complete. Awaiting client confirmation.";
+                        $message = "Unable to decline booking.";
+                        $messageType = "error";
                     }
-                    $messageType = "success";
-                } else {
-                    $message = $result['message'] ?? "Unable to confirm completion.";
-                    $messageType = "error";
-                }
-                break;
-            case 'ack_payment':
-                $result = markTechnicianPaymentAcknowledgement($conn, $booking_id, $user_id);
-                if ($result['success']) {
-                    $message = $result['message'] ?? "Payment acknowledged. Booking closed.";
-                    $messageType = "success";
-                } else {
-                    $message = $result['message'] ?? "Unable to acknowledge payment.";
-                    $messageType = "error";
-                }
-                break;
+                    break;
+                case 'start':
+                    $stmt = $conn->prepare("UPDATE booking SET Status = 'in_progress' WHERE Booking_ID = ? AND Technician_ID = ? AND Status IN ('assigned','awaiting_acceptance','pending')");
+                    if ($stmt) {
+                        $stmt->bind_param('ii', $booking_id, $user_id);
+                        $stmt->execute();
+                        if ($stmt->affected_rows > 0) {
+                            $message = "Job marked as in progress.";
+                            $messageType = "success";
+                        } else {
+                            $message = "Unable to update status.";
+                            $messageType = "error";
+                        }
+                        $stmt->close();
+                    }
+                    break;
+                case 'complete':
+                    $result = markBookingConfirmation($conn, $booking_id, 'technician');
+                    if ($result['success']) {
+                        $statusAfter = $result['status'] ?? '';
+                        if ($result['completed'] && $statusAfter === 'completed') {
+                            $message = "Job completed!";
+                        } elseif ($statusAfter === 'awaiting_payment') {
+                            $message = "Both sides confirmed. Waiting for the client to settle payment.";
+                        } elseif ($statusAfter === 'awaiting_payout') {
+                            $message = "Client reported payment. Confirm once you receive it.";
+                        } else {
+                            $message = "Marked complete. Awaiting client confirmation.";
+                        }
+                        $messageType = "success";
+                    } else {
+                        $message = $result['message'] ?? "Unable to confirm completion.";
+                        $messageType = "error";
+                    }
+                    break;
+                case 'ack_payment':
+                    $result = markTechnicianPaymentAcknowledgement($conn, $booking_id, $user_id);
+                    if ($result['success']) {
+                        $message = $result['message'] ?? "Payment acknowledged. Booking closed.";
+                        $messageType = "success";
+                    } else {
+                        $message = $result['message'] ?? "Unable to acknowledge payment.";
+                        $messageType = "error";
+                    }
+                    break;
+            }
         }
     }
 }

@@ -2,6 +2,7 @@
 session_start();
 include '../connection.php';
 require_once __DIR__ . '/../subscription_helper.php';
+require_once __DIR__ . '/../booking_workflow_helper.php';
 
 // Check if user is technician
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'technician') {
@@ -25,6 +26,7 @@ function isSubscriptionActive($flag, $expires) {
 }
 
  $subscription_plans = getSubscriptionPlans('technician');
+$busy_with_job = technicianHasPendingBooking($conn, $user_id);
 $payment_feedback = $_SESSION['subscription_flash'] ?? null;
 if (isset($_SESSION['subscription_flash'])) {
     unset($_SESSION['subscription_flash']);
@@ -198,7 +200,7 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                                 </div>
                                 <hr>
                                 <a href="technician_dashboard.php">🏠 Dashboard</a>
-                                <a href="assigned_jobs.php">📋 My Jobs</a>
+                                <a href="assigned_jobs.php"<?php echo $busy_with_job ? ' class="disabled-link" title="Finish your active job before taking new assignments"' : ''; ?>>📋 My Jobs</a>
                                 <a href="messages.php">💬 Messages</a>
                                 <a href="update_technician_profile.php">👤 Profile Settings</a>
                                 <a href="verify_certification.php">📄 Certificates</a>
@@ -282,6 +284,11 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                                 </button>
                                 <p class="payment-hint">Complete your GCash payment first, then enter the official reference from the QR wallet.</p>
                             </form>
+                        <?php endif; ?>
+                        <?php if ($busy_with_job): ?>
+                            <div class="alert alert-warning" style="margin-top: 1.25rem;">
+                                ⚠️ You currently have an active booking in progress. Complete it before accepting new jobs or creating additional bookings.
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>

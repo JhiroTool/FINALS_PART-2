@@ -23,6 +23,112 @@ function ensureBookingWorkflowTable(mysqli $conn): void
     $conn->query("ALTER TABLE booking_workflow ADD COLUMN IF NOT EXISTS Technician_Paid TINYINT(1) NOT NULL DEFAULT 0");
 }
 
+function getHandshakePendingStatuses(): array
+{
+    return [
+        'awaiting_acceptance',
+        'pending',
+        'assigned',
+        'in_progress',
+        'awaiting_confirmation',
+        'awaiting_payment',
+        'awaiting_payout',
+    ];
+}
+
+function clientHasPendingBooking(mysqli $conn, int $clientId, ?int $excludeBookingId = null): bool
+{
+    $statuses = getHandshakePendingStatuses();
+    if (empty($statuses)) {
+        return false;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+    $sql = "SELECT 1 FROM booking WHERE Client_ID = ? AND Status IN ($placeholders)";
+    if ($excludeBookingId !== null) {
+        $sql .= " AND Booking_ID <> ?";
+    }
+    $sql .= " LIMIT 1";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return false;
+    }
+
+    $types = 'i' . str_repeat('s', count($statuses));
+    $params = array_merge([$clientId], $statuses);
+    if ($excludeBookingId !== null) {
+        $types .= 'i';
+        $params[] = $excludeBookingId;
+    }
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $stmt->store_result();
+    $hasPending = $stmt->num_rows > 0;
+    $stmt->close();
+
+    return $hasPending;
+}
+
+function technicianHasPendingBooking(mysqli $conn, int $technicianId, ?int $excludeBookingId = null): bool
+{
+    $statuses = getHandshakePendingStatuses();
+    if (empty($statuses)) {
+        return false;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+    $sql = "SELECT 1 FROM booking WHERE Technician_ID = ? AND Status IN ($placeholders)";
+    if ($excludeBookingId !== null) {
+        $sql .= " AND Booking_ID <> ?";
+    }
+    $sql .= " LIMIT 1";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return false;
+    }
+
+    $types = 'i' . str_repeat('s', count($statuses));
+    $params = array_merge([$technicianId], $statuses);
+    if ($excludeBookingId !== null) {
+        $types .= 'i';
+        $params[] = $excludeBookingId;
+    }
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $stmt->store_result();
+    $hasPending = $stmt->num_rows > 0;
+    $stmt->close();
+
+    return $hasPending;
+}
+
+function getTechniciansWithPendingBookings(mysqli $conn): array
+{
+    $statuses = getHandshakePendingStatuses();
+    if (empty($statuses)) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+    $sql = "SELECT DISTINCT Technician_ID FROM booking WHERE Technician_ID IS NOT NULL AND Status IN ($placeholders)";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return [];
+    }
+
+    $types = str_repeat('s', count($statuses));
+    $stmt->bind_param($types, ...$statuses);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $busy = [];
+    while ($row = $result->fetch_assoc()) {
+        $busy[(int)$row['Technician_ID']] = true;
+    }
+    $stmt->close();
+
+    return $busy;
+}
+
 function resetBookingToPending(mysqli $conn, int $bookingId): bool
 {
     ensureBookingWorkflowTable($conn);
@@ -45,6 +151,9 @@ function resetBookingToPending(mysqli $conn, int $bookingId): bool
 function initializeBookingWorkflow(mysqli $conn, int $bookingId, int $technicianId): void
 {
     ensureBookingWorkflowTable($conn);
+    if (technicianHasPendingBooking($conn, $technicianId, $bookingId)) {
+        return;
+    }
     $stmt = $conn->prepare("INSERT INTO booking_workflow (Booking_ID, Technician_ID) VALUES (?, ?) ON DUPLICATE KEY UPDATE Technician_ID = VALUES(Technician_ID), Technician_Accepted = 0, Client_Confirmed = 0, Technician_Confirmed = 0, Payment_Recorded = 0, Technician_Paid = 0");
     if ($stmt) {
         $stmt->bind_param('ii', $bookingId, $technicianId);
@@ -82,6 +191,11 @@ function getBookingWorkflow(mysqli $conn, int $bookingId): ?array
 function markTechnicianAcceptance(mysqli $conn, int $bookingId, int $technicianId): bool
 {
     ensureBookingWorkflowTable($conn);
+
+    if (technicianHasPendingBooking($conn, $technicianId, $bookingId)) {
+        return false;
+    }
+
     $stmt = $conn->prepare("UPDATE booking_workflow SET Technician_Accepted = 1 WHERE Booking_ID = ? AND Technician_ID = ?");
     if (!$stmt) {
         return false;

@@ -96,6 +96,7 @@ $client_is_subscribed = isSubscriptionActive((int)($client['Is_Subscribed'] ?? 0
 $client_city = $client['City'] ?? '';
 $client_badge = $client_is_subscribed ? 'Premium Client' : 'Standard Client';
 $subscription_expiry_text = $client_is_subscribed && $client['Subscription_Expires'] ? date('M j, Y', strtotime($client['Subscription_Expires'])) : null;
+$client_has_pending_booking = clientHasPendingBooking($conn, $user_id);
 
 // Prepare service slug map for filtering
 $service_slug_map = [];
@@ -107,6 +108,7 @@ $approved_technicians = [];
 $services_with_available = array_fill_keys(array_keys($service_categories), false);
 $available_specializations = [];
 $service_technician_map = [];
+$busy_technicians = getTechniciansWithPendingBookings($conn);
 
 $tech_stmt = $conn->prepare("SELECT Technician_ID, Technician_FN, Technician_LN, Technician_Phone, Specialization, Service_Pricing, Service_Location, Is_Subscribed, Subscription_Expires FROM technician WHERE Status = 'approved'");
 if ($tech_stmt && $tech_stmt->execute()) {
@@ -137,6 +139,10 @@ if ($tech_stmt && $tech_stmt->execute()) {
                 $client['Province'] ?? null,
                 $client['Barangay'] ?? null
             );
+        }
+
+        if (isset($busy_technicians[(int)$tech_row['Technician_ID']])) {
+            continue;
         }
 
         $technician_entry = [
@@ -245,61 +251,67 @@ function technicianSupportsService(array $requiredSpecs, array $technicianSpecs)
 
 // Handle form submission
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $service_type = trim($_POST['service_type'] ?? '');
-    $technician_id_post = isset($_POST['technician_id']) ? (int)$_POST['technician_id'] : 0;
-    $apt_date = $_POST['apt_date'] ?? '';
-    $description = trim($_POST['description'] ?? '');
-    $priority = $_POST['priority'] ?? 'normal';
-
-    $service_type_input = $service_type;
-    $technician_id_input = $technician_id_post ? (string)$technician_id_post : '';
-    $apt_date_input = $apt_date;
-    $description_input = $description;
-    $priority_input = $priority;
-
-    $valid_service = isset($service_categories[$service_type]) && !empty($services_with_available[$service_type]) && !empty($service_technician_map[$service_type]);
-    if (!$valid_service) {
-        $message = "❌ Please select a service with available technicians.";
-        $messageType = "error";
-    } elseif ($technician_id_post <= 0) {
-        $message = "❌ Please choose a technician for your selected service.";
-        $messageType = "error";
-    } elseif (empty($apt_date)) {
-        $message = "❌ Please provide your preferred schedule.";
+    if ($client_has_pending_booking) {
+        $message = "⚠️ You already have an active booking in progress. Please finish or cancel it before requesting another service.";
         $messageType = "error";
     } else {
-        $eligible_technicians = array_filter($service_technician_map[$service_type], function ($tech) use ($technician_id_post) {
-            return $tech['id'] === $technician_id_post;
-        });
+        $service_type = trim($_POST['service_type'] ?? '');
+        $technician_id_post = isset($_POST['technician_id']) ? (int)$_POST['technician_id'] : 0;
+        $apt_date = $_POST['apt_date'] ?? '';
+        $description = trim($_POST['description'] ?? '');
+        $priority = $_POST['priority'] ?? 'normal';
 
-        if (empty($eligible_technicians)) {
-            $message = "❌ Selected technician is no longer available for this service.";
+        $service_type_input = $service_type;
+        $technician_id_input = $technician_id_post ? (string)$technician_id_post : '';
+        $apt_date_input = $apt_date;
+        $description_input = $description;
+        $priority_input = $priority;
+
+        $valid_service = isset($service_categories[$service_type]) && !empty($services_with_available[$service_type]) && !empty($service_technician_map[$service_type]);
+
+        if (!$valid_service) {
+            $message = "❌ Please select a service with available technicians.";
+            $messageType = "error";
+        } elseif ($technician_id_post <= 0) {
+            $message = "❌ Please choose a technician for your selected service.";
+            $messageType = "error";
+        } elseif (empty($apt_date)) {
+            $message = "❌ Please provide your preferred schedule.";
             $messageType = "error";
         } else {
-            $booking_stmt = $conn->prepare("
-                INSERT INTO booking (Client_ID, Technician_ID, Service_Type, AptDate, Status, Description)
-                VALUES (?, ?, ?, ?, 'awaiting_acceptance', ?)
-            ");
-            if ($booking_stmt) {
-                $booking_stmt->bind_param("iisss", $user_id, $technician_id_post, $service_type, $apt_date, $description);
-                if ($booking_stmt->execute()) {
-                    $new_booking_id = $conn->insert_id;
-                    initializeBookingWorkflow($conn, $new_booking_id, $technician_id_post);
-                    $message = "✅ Service request submitted! Please wait while the technician reviews and accepts your booking.";
-                    $messageType = "success";
-                    $service_type_input = '';
-                    $technician_id_input = '';
-                    $apt_date_input = '';
-                    $description_input = '';
-                    $priority_input = 'normal';
+            $eligible_technicians = array_filter($service_technician_map[$service_type], function ($tech) use ($technician_id_post) {
+                return $tech['id'] === $technician_id_post;
+            });
+
+            if (empty($eligible_technicians)) {
+                $message = "❌ Selected technician is no longer available for this service.";
+                $messageType = "error";
+            } else {
+                $booking_stmt = $conn->prepare("
+                    INSERT INTO booking (Client_ID, Technician_ID, Service_Type, AptDate, Status, Description)
+                    VALUES (?, ?, ?, ?, 'awaiting_acceptance', ?)
+                ");
+                if ($booking_stmt) {
+                    $booking_stmt->bind_param("iisss", $user_id, $technician_id_post, $service_type, $apt_date, $description);
+                    if ($booking_stmt->execute()) {
+                        $new_booking_id = $conn->insert_id;
+                        initializeBookingWorkflow($conn, $new_booking_id, $technician_id_post);
+                        $message = "✅ Service request submitted! Please wait while the technician reviews and accepts your booking.";
+                        $messageType = "success";
+                        $service_type_input = '';
+                        $technician_id_input = '';
+                        $apt_date_input = '';
+                        $description_input = '';
+                        $priority_input = 'normal';
+                    } else {
+                        $message = "❌ Error submitting service request. Please try again or contact support.";
+                        $messageType = "error";
+                    }
+                    $booking_stmt->close();
                 } else {
-                    $message = "❌ Error submitting service request. Please try again or contact support.";
+                    $message = "❌ Unable to create booking. Please try again later.";
                     $messageType = "error";
                 }
-                $booking_stmt->close();
-            } else {
-                $message = "❌ Unable to create booking. Please try again later.";
-                $messageType = "error";
             }
         }
     }
@@ -462,7 +474,7 @@ foreach ($service_categories as $service_name => $details) {
                                 <p>Select the appliance or device that requires repair service</p>
                                 
                                 <div style="margin: 1.5rem 0;">
-                                    <select id="service_type" name="service_type" required style="width: 100%; padding: 16px 20px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; background: #f8fafc;">
+                                    <select id="service_type" name="service_type" required style="width: 100%; padding: 16px 20px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; background: #f8fafc;" <?php echo $client_has_pending_booking ? 'disabled' : ''; ?>>
                                         <option value="">Choose your appliance or service type</option>
                                         <?php if (empty($filtered_service_categories)): ?>
                                         <option value="" disabled>No verified technicians available yet</option>
@@ -491,7 +503,7 @@ foreach ($service_categories as $service_name => $details) {
                                 <p>Select from technicians who cover your area for the chosen service</p>
 
                                 <div style="margin: 1.5rem 0;">
-                                    <select id="technician_id" name="technician_id" required style="width: 100%; padding: 16px 20px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; background: #f8fafc;" <?php echo empty($service_type_input) ? 'disabled' : ''; ?>>
+                                    <select id="technician_id" name="technician_id" required style="width: 100%; padding: 16px 20px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; background: #f8fafc;" <?php echo ($client_has_pending_booking || empty($service_type_input)) ? 'disabled' : ''; ?>>
                                         <option value="">Choose a technician</option>
                                     </select>
                                     <div id="technician-helper" style="margin-top: 0.75rem; color: #64748b; font-size: 0.9rem;"></div>
@@ -563,7 +575,7 @@ foreach ($service_categories as $service_name => $details) {
 
                     <!-- Submit Button -->
                     <div style="text-align: center; margin-top: 2rem;">
-                        <button type="submit" class="action-btn" id="submitBtn" style="min-width: 300px; padding: 18px 36px; font-size: 1.2rem;">
+                        <button type="submit" class="action-btn" id="submitBtn" style="min-width: 300px; padding: 18px 36px; font-size: 1.2rem;" <?php echo $client_has_pending_booking ? 'disabled' : ''; ?>>
                             🚀 Submit Service Request
                         </button>
                     </div>
