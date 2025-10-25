@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['payment_id'], $_POST[
 
     if (!$payment) {
         $feedback = ['type' => 'error', 'text' => 'Payment record not found.'];
-    } elseif (!in_array($action, ['approve', 'cancel'], true)) {
+    } elseif (!in_array($action, ['approve', 'cancel', 'revoke'], true)) {
         $feedback = ['type' => 'error', 'text' => 'Unsupported action.'];
     } else {
         $user_table = $payment['User_Type'] === 'client' ? 'client' : 'technician';
@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['payment_id'], $_POST[
                 $activate_stmt->close();
 
                 $feedback = ['type' => 'success', 'text' => 'Subscription activated successfully.'];
-            } else {
+            } elseif ($action === 'cancel') {
                 $combined_notes = appendAdminNote($payment['Notes'], $admin_note);
 
                 $cancel_stmt = $conn->prepare("UPDATE subscription_payments SET Status = 'cancelled', Notes = ? WHERE Payment_ID = ?");
@@ -82,6 +82,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['payment_id'], $_POST[
                 $cancel_stmt->close();
 
                 $feedback = ['type' => 'info', 'text' => 'Payment marked as cancelled.'];
+            } else {
+                if ($payment['Status'] !== 'paid') {
+                    throw new Exception('Only paid subscriptions can be removed.');
+                }
+
+                $noteText = $admin_note !== '' ? $admin_note : 'Subscription manually revoked by admin.';
+                $combined_notes = appendAdminNote($payment['Notes'], $noteText);
+                $now = date('Y-m-d H:i:s');
+
+                $revoke_stmt = $conn->prepare("UPDATE subscription_payments SET Status = 'cancelled', Expires_At = ?, Notes = ? WHERE Payment_ID = ?");
+                $revoke_stmt->bind_param("ssi", $now, $combined_notes, $payment_id);
+                $revoke_stmt->execute();
+                $revoke_stmt->close();
+
+                $clear_stmt = $conn->prepare("UPDATE {$user_table} SET Is_Subscribed = 0, Subscription_Expires = NULL WHERE {$id_field} = ?");
+                $clear_stmt->bind_param("i", $payment['User_ID']);
+                $clear_stmt->execute();
+                $clear_stmt->close();
+
+                $feedback = ['type' => 'info', 'text' => 'Subscription removed and user reverted to standard access.'];
             }
 
             $conn->commit();
@@ -407,6 +427,14 @@ $stmt->close();
                                     <div class="action-buttons">
                                         <button type="submit" name="action" value="approve" class="btn-approve">Approve & Activate</button>
                                         <button type="submit" name="action" value="cancel" class="btn-cancel">Mark as Cancelled</button>
+                                    </div>
+                                </form>
+                            <?php elseif ($payment['Status'] === 'paid'): ?>
+                                <form method="POST" class="action-form">
+                                    <input type="hidden" name="payment_id" value="<?php echo (int)$payment['Payment_ID']; ?>">
+                                    <textarea name="admin_note" placeholder="Reason for removal (optional)"></textarea>
+                                    <div class="action-buttons">
+                                        <button type="submit" name="action" value="revoke" class="btn-cancel">Remove Subscription</button>
                                     </div>
                                 </form>
                             <?php endif; ?>

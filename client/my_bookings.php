@@ -255,6 +255,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'description' => 'Technician marked this job done. Please confirm once you are satisfied.',
                     'filters' => ['awaiting_confirmation']
                 ],
+                'awaiting_payment' => [
+                    'title' => 'Settle Payment',
+                    'icon' => '💳',
+                    'class' => 'progress',
+                    'description' => 'Both parties confirmed. Please record your payment to finish the job.',
+                    'filters' => ['awaiting_payment']
+                ],
+                'awaiting_payout' => [
+                    'title' => 'Payment Under Review',
+                    'icon' => '💼',
+                    'class' => 'progress',
+                    'description' => 'Payment submitted. Waiting for the technician to acknowledge receipt.',
+                    'filters' => ['awaiting_payout']
+                ],
                 'completed' => [
                     'title' => 'Completed Services',
                     'icon' => '✅',
@@ -324,6 +338,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'assigned' => ['icon_background' => 'linear-gradient(135deg, #fef3c7, #fde68a)', 'icon_color' => '#92400e'],
                         'in_progress' => ['icon_background' => 'linear-gradient(135deg, #dbeafe, #bfdbfe)', 'icon_color' => '#1d4ed8'],
                         'awaiting_confirmation' => ['icon_background' => 'linear-gradient(135deg, #fff7ed, #fde68a)', 'icon_color' => '#b45309'],
+                        'awaiting_payment' => ['icon_background' => 'linear-gradient(135deg, #fef9c3, #fde047)', 'icon_color' => '#854d0e'],
+                        'awaiting_payout' => ['icon_background' => 'linear-gradient(135deg, #e0f2fe, #bae6fd)', 'icon_color' => '#0c4a6e'],
                         'completed' => ['icon_background' => 'linear-gradient(135deg, #dcfce7, #bbf7d0)', 'icon_color' => '#047857']
                     ];
             ?>
@@ -362,6 +378,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <div class="action-badge" style="background: #dbeafe; color: #1d4ed8;">In progress</div>
                                         <?php elseif ($currentStatus === 'awaiting_confirmation'): ?>
                                             <div class="action-badge" style="background: #fef3c7; color: #92400e;">Action needed</div>
+                                        <?php elseif ($currentStatus === 'awaiting_payment'): ?>
+                                            <div class="action-badge" style="background: #fef9c3; color: #854d0e;">Settle payment</div>
+                                        <?php elseif ($currentStatus === 'awaiting_payout'): ?>
+                                            <div class="action-badge" style="background: #e0f2fe; color: #0c4a6e;">Technician confirmation pending</div>
                                         <?php endif; ?>
                                         
                                         <div class="action-icon" style="background: <?php echo $cardTheme['icon_background']; ?>; color: <?php echo $cardTheme['icon_color']; ?>;">
@@ -485,13 +505,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                                 </div>
                                             <?php endif; ?>
 
-                                            <?php if ($status === 'completed' && empty($booking['JobPayment_ID'])): ?>
+                                            <?php if (in_array($currentStatus, ['awaiting_payment', 'completed'], true) && empty($booking['JobPayment_ID'])): ?>
                                                 <button class="action-btn" style="background: linear-gradient(135deg, #10b981, #047857);" onclick="openPaymentModal(<?php echo $booking['Booking_ID']; ?>, <?php echo json_encode((float)($booking['Service_Pricing'] ?? 0)); ?>)">
-                                                    💳 Settle Payment
+                                                    💳 Record Payment
                                                 </button>
-                                            <?php elseif ($status === 'completed' && !empty($booking['JobPayment_ID'])): ?>
+                                            <?php elseif (in_array($currentStatus, ['awaiting_payout', 'completed'], true) && !empty($booking['JobPayment_ID'])): ?>
                                                 <div class="action-btn" style="background: linear-gradient(135deg, #10b981, #059669); cursor: default;">
-                                                    ✅ Paid via <?php echo htmlspecialchars($booking['JobPayment_Method']); ?>
+                                                    ✅ Payment logged via <?php echo htmlspecialchars($booking['JobPayment_Method']); ?>
                                                 </div>
                                             <?php endif; ?>
 

@@ -1,6 +1,7 @@
 <?php
 session_start();
 include '../connection.php';
+require_once __DIR__ . '/../subscription_helper.php';
 
 // Check if user is client
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'client') {
@@ -20,26 +21,34 @@ function isSubscriptionActive($flag, $expires) {
     return strtotime($expires) > time();
 }
 
-$payment_feedback = null;
+$subscription_plans = getSubscriptionPlans('client');
+$payment_feedback = $_SESSION['subscription_flash'] ?? null;
+if (isset($_SESSION['subscription_flash'])) {
+    unset($_SESSION['subscription_flash']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_subscription_payment'])) {
-    $amount = isset($_POST['amount']) ? floatval($_POST['amount']) : 0;
+    $plan_days = isset($_POST['plan_days']) ? (int)$_POST['plan_days'] : 30;
     $reference = trim($_POST['reference'] ?? '');
-    $plan_days = isset($_POST['plan_days']) ? max(1, (int)$_POST['plan_days']) : 30;
     $notes = trim($_POST['notes'] ?? '');
 
-    if ($amount <= 0 || $reference === '') {
-        $payment_feedback = ['type' => 'error', 'text' => 'Please provide a valid amount and payment reference.'];
+    $result = processSubscriptionPurchase(
+        $conn,
+        'client',
+        $user_id,
+        $plan_days,
+        $reference !== '' ? $reference : null,
+        $notes !== '' ? $notes : null
+    );
+
+    if ($result['success']) {
+        $_SESSION['subscription_flash'] = ['type' => 'success', 'text' => $result['message']];
     } else {
-        $stmt_payment = $conn->prepare("INSERT INTO subscription_payments (User_ID, User_Type, Amount, Reference, Plan_Days, Notes) VALUES (?, 'client', ?, ?, ?, ?)");
-        $stmt_payment->bind_param("idsis", $user_id, $amount, $reference, $plan_days, $notes);
-        if ($stmt_payment->execute()) {
-            $payment_feedback = ['type' => 'success', 'text' => 'Payment submitted. Please wait for admin approval.'];
-        } else {
-            $payment_feedback = ['type' => 'error', 'text' => 'Unable to submit payment. Try again later.'];
-        }
-        $stmt_payment->close();
+        $_SESSION['subscription_flash'] = ['type' => 'error', 'text' => $result['message']];
     }
+
+    header('Location: client_dashboard.php');
+    exit();
 }
 
 // Get client info
@@ -63,14 +72,14 @@ $payment_result = $payment_stmt->get_result();
 $latest_payment = $payment_result->fetch_assoc();
 $payment_stmt->close();
 
-$pending_payment = $latest_payment && $latest_payment['Status'] === 'pending';
+$pending_payment = false;
 
 if ($is_subscribed) {
     $subscription_title = 'You are a Premium Client';
     $subscription_message = 'Your new bookings are auto-routed to premium technicians in your area.';
 } else {
     $subscription_title = 'Upgrade for Priority Service';
-    $subscription_message = 'Subscribe to unlock instant technician matching and priority support.';
+    $subscription_message = 'Activate premium to unlock instant technician matching and priority support. Your plan starts right away after checkout.';
 }
 
 // Initialize variables with default values
@@ -300,24 +309,25 @@ try {
                                     </div>
                                 </div>
                             <?php else: ?>
+                                <div class="payment-instructions">
+                                    <strong>Pay via GCash</strong>
+                                    <div class="payment-contact">📱 Send payment to <span class="gcash-number">0994&nbsp;452&nbsp;2154</span></div>
+                                    <p class="payment-hint">After paying, copy the GCash reference number and enter it below.</p>
+                                </div>
                                 <form method="POST" class="subscription-form" autocomplete="off">
                                     <input type="hidden" name="create_subscription_payment" value="1">
                                     <div class="subscription-form-grid">
                                         <label>
                                             <span>Plan</span>
                                             <select name="plan_days" required>
-                                                <option value="30">30 days - ₱499</option>
-                                                <option value="90">90 days - ₱1,299</option>
-                                                <option value="180">180 days - ₱2,399</option>
+                                                <?php foreach ($subscription_plans as $days => $plan): ?>
+                                                    <option value="<?php echo (int)$days; ?>"><?php echo htmlspecialchars($plan['label']); ?></option>
+                                                <?php endforeach; ?>
                                             </select>
                                         </label>
                                         <label>
-                                            <span>Amount Paid (₱)</span>
-                                            <input type="number" name="amount" min="1" step="0.01" placeholder="e.g. 499" required>
-                                        </label>
-                                        <label>
-                                            <span>Payment Reference</span>
-                                            <input type="text" name="reference" maxlength="100" placeholder="GCash Ref / Bank Trace" required>
+                                            <span>GCash Reference Number</span>
+                                            <input type="text" name="reference" maxlength="100" placeholder="e.g. 1234 5678 9012" required>
                                         </label>
                                         <label class="full-width">
                                             <span>Notes (optional)</span>
@@ -325,9 +335,9 @@ try {
                                         </label>
                                     </div>
                                     <button type="submit" class="subscription-btn subscribe">
-                                        Submit Payment for Verification
+                                        Activate Premium
                                     </button>
-                                    <p class="payment-hint">After submitting, upload proof via chat or email so admin can approve quickly.</p>
+                                    <p class="payment-hint">Make sure you already paid via GCash and use the official reference number from the QR wallet.</p>
                                 </form>
                             <?php endif; ?>
                         </div>

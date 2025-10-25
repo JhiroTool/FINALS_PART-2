@@ -1,6 +1,7 @@
 <?php
 session_start();
 include '../connection.php';
+require_once __DIR__ . '/../subscription_helper.php';
 
 // Check if user is technician
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] != 'technician') {
@@ -23,26 +24,34 @@ function isSubscriptionActive($flag, $expires) {
     return strtotime($expires) > time();
 }
 
-$payment_feedback = null;
+ $subscription_plans = getSubscriptionPlans('technician');
+$payment_feedback = $_SESSION['subscription_flash'] ?? null;
+if (isset($_SESSION['subscription_flash'])) {
+    unset($_SESSION['subscription_flash']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_subscription_payment'])) {
-    $amount = isset($_POST['amount']) ? floatval($_POST['amount']) : 0;
+    $plan_days = isset($_POST['plan_days']) ? (int)$_POST['plan_days'] : 30;
     $reference = trim($_POST['reference'] ?? '');
-    $plan_days = isset($_POST['plan_days']) ? max(1, (int)$_POST['plan_days']) : 30;
     $notes = trim($_POST['notes'] ?? '');
 
-    if ($amount <= 0 || $reference === '') {
-        $payment_feedback = ['type' => 'error', 'text' => 'Please provide a valid amount and payment reference.'];
+    $result = processSubscriptionPurchase(
+        $conn,
+        'technician',
+        $user_id,
+        $plan_days,
+        $reference !== '' ? $reference : null,
+        $notes !== '' ? $notes : null
+    );
+
+    if ($result['success']) {
+        $_SESSION['subscription_flash'] = ['type' => 'success', 'text' => $result['message']];
     } else {
-        $stmt_payment = $conn->prepare("INSERT INTO subscription_payments (User_ID, User_Type, Amount, Reference, Plan_Days, Notes) VALUES (?, 'technician', ?, ?, ?, ?)");
-        $stmt_payment->bind_param("idsis", $user_id, $amount, $reference, $plan_days, $notes);
-        if ($stmt_payment->execute()) {
-            $payment_feedback = ['type' => 'success', 'text' => 'Payment submitted. Admin will activate premium after verification.'];
-        } else {
-            $payment_feedback = ['type' => 'error', 'text' => 'Unable to submit payment. Try again later.'];
-        }
-        $stmt_payment->close();
+        $_SESSION['subscription_flash'] = ['type' => 'error', 'text' => $result['message']];
     }
+
+    header('Location: technician_dashboard.php');
+    exit();
 }
 
 $stmt = $conn->prepare("SELECT Technician_FN, Technician_LN, Technician_Email, Technician_Phone, Specialization, Service_Pricing, Status, Ratings, Technician_Profile, Tech_Certificate, Is_Subscribed, Subscription_Expires FROM technician WHERE Technician_ID = ?");
@@ -75,14 +84,11 @@ $payment_result = $payment_stmt->get_result();
 $latest_payment = $payment_result->fetch_assoc();
 $payment_stmt->close();
 
-$pending_payment = $latest_payment && $latest_payment['Status'] === 'pending';
+$pending_payment = false;
 
 if (!$subscription_message && $is_subscribed) {
     $subscription_message = "🌟 Premium active. You're prioritized for client bookings.";
     $subscription_type = 'success';
-} elseif (!$subscription_message && $pending_payment) {
-    $subscription_message = "⏳ Payment pending review. You'll be upgraded once the admin approves.";
-    $subscription_type = 'info';
 } elseif (!$subscription_message) {
     $subscription_message = "⚡ Submit a payment to unlock premium booking priority.";
     $subscription_type = 'info';
@@ -160,16 +166,37 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                         <div class="user-info">
                             <h3><?php echo htmlspecialchars($technician['Technician_FN']); ?></h3>
                             <p><?php echo htmlspecialchars($technician['Specialization']); ?></p>
-                            <span class="subscription-chip <?php echo $is_subscribed ? 'premium' : 'standard'; ?>">
-                                <?php echo $is_subscribed ? 'Premium Technician' : 'Standard Technician'; ?>
-                            </span>
-                            <?php if ($is_subscribed && $subscription_expiry): ?>
-                                <span class="subscription-chip expiry">Valid until <?php echo htmlspecialchars($subscription_expiry); ?></span>
-                            <?php endif; ?>
                         </div>
                         <div class="user-dropdown">
                             <button class="dropdown-btn">⚙️</button>
                             <div class="dropdown-menu">
+                                <div class="dropdown-subscription <?php echo $is_subscribed ? 'active' : 'standard'; ?>">
+                                    <div class="subscription-chip">
+                                        <span class="chip-label"><?php echo $is_subscribed ? 'Premium Technician' : 'Standard Technician'; ?></span>
+                                        <?php if ($is_subscribed && $subscription_expiry): ?>
+                                            <span class="chip-separator">•</span>
+                                            <span class="chip-value"><?php echo htmlspecialchars($subscription_expiry); ?></span>
+                                        <?php elseif (!$is_subscribed): ?>
+                                            <span class="chip-separator">•</span>
+                                            <span class="chip-value">Upgrade for priority</span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <p class="subscription-hint">
+                                        <?php if ($is_subscribed): ?>
+                                            Priority matching is active.
+                                        <?php else: ?>
+                                            Submit a payment to unlock premium perks.
+                                        <?php endif; ?>
+                                    </p>
+                                    <?php if (!$is_subscribed): ?>
+                                        <div class="payment-instructions">
+                                            <strong>Pay via GCash</strong>
+                                            <div class="payment-contact">📱 Send payment to <span class="gcash-number">0994&nbsp;452&nbsp;2154</span></div>
+                                            <p class="payment-hint">After paying, enter the official GCash reference number below.</p>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                                <hr>
                                 <a href="technician_dashboard.php">🏠 Dashboard</a>
                                 <a href="assigned_jobs.php">📋 My Jobs</a>
                                 <a href="messages.php">💬 Messages</a>
@@ -236,18 +263,14 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                                     <label>
                                         <span>Plan</span>
                                         <select name="plan_days" required>
-                                            <option value="30">30 days - ₱449</option>
-                                            <option value="90">90 days - ₱1,149</option>
-                                            <option value="180">180 days - ₱2,099</option>
+                                            <?php foreach ($subscription_plans as $days => $plan): ?>
+                                                <option value="<?php echo (int)$days; ?>"><?php echo htmlspecialchars($plan['label']); ?></option>
+                                            <?php endforeach; ?>
                                         </select>
                                     </label>
                                     <label>
-                                        <span>Amount Paid (₱)</span>
-                                        <input type="number" name="amount" min="1" step="0.01" placeholder="e.g. 449" required>
-                                    </label>
-                                    <label>
-                                        <span>Payment Reference</span>
-                                        <input type="text" name="reference" maxlength="100" placeholder="GCash Ref / Bank Trace" required>
+                                        <span>GCash Reference Number</span>
+                                        <input type="text" name="reference" maxlength="100" placeholder="e.g. 1234 5678 9012" required>
                                     </label>
                                     <label class="full-width">
                                         <span>Notes (optional)</span>
@@ -255,9 +278,9 @@ $hourly_rate = $technician['Service_Pricing'] ?: '0';
                                     </label>
                                 </div>
                                 <button type="submit" class="subscription-btn subscribe">
-                                    Submit Payment for Verification
+                                    Activate Premium
                                 </button>
-                                <p class="payment-hint">After submitting, send your receipt to admin for faster approval.</p>
+                                <p class="payment-hint">Complete your GCash payment first, then enter the official reference from the QR wallet.</p>
                             </form>
                         <?php endif; ?>
                     </div>

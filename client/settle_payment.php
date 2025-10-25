@@ -2,6 +2,7 @@
 session_start();
 header('Content-Type: application/json');
 include '../connection.php';
+require_once __DIR__ . '/../booking_workflow_helper.php';
 
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] !== 'client') {
     http_response_code(403);
@@ -40,9 +41,9 @@ if (empty($booking['Technician_ID'])) {
     exit();
 }
 
-if ($booking['Status'] !== 'completed') {
+if (!in_array($booking['Status'], ['awaiting_payment', 'awaiting_payout', 'completed'], true)) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Only completed bookings can be settled']);
+    echo json_encode(['success' => false, 'message' => 'This booking is not waiting for payment settlement']);
     exit();
 }
 
@@ -64,7 +65,7 @@ $confirmed_at = date('Y-m-d H:i:s');
 try {
     $conn->begin_transaction();
 
-    $insert_payment = $conn->prepare("INSERT INTO job_payments (Booking_ID, Client_ID, Technician_ID, Amount, Method, Notes, Confirmed_By, Confirmed_At) VALUES (?, ?, ?, ?, ?, ?, 'client', ?)");
+    $insert_payment = $conn->prepare("INSERT INTO job_payments (Booking_ID, Client_ID, Technician_ID, Amount, Method, Notes, Status, Confirmed_By, Confirmed_At) VALUES (?, ?, ?, ?, ?, ?, 'pending', 'client', ?)");
     $insert_payment->bind_param('iiidsss', $booking_id, $client_id, $booking['Technician_ID'], $amount, $method, $notes, $confirmed_at);
     if (!$insert_payment->execute()) {
         throw new Exception('Failed to record job payment');
@@ -109,6 +110,10 @@ try {
             throw new Exception('Failed to insert technician earnings');
         }
         $insert_earnings->close();
+    }
+
+    if (!markWorkflowPaymentRecorded($conn, $booking_id)) {
+        throw new Exception('Failed to update booking payment status');
     }
 
     $conn->commit();

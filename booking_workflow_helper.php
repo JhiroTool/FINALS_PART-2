@@ -9,6 +9,8 @@ function ensureBookingWorkflowTable(mysqli $conn): void
         Technician_Accepted TINYINT(1) NOT NULL DEFAULT 0,
         Client_Confirmed TINYINT(1) NOT NULL DEFAULT 0,
         Technician_Confirmed TINYINT(1) NOT NULL DEFAULT 0,
+        Payment_Recorded TINYINT(1) NOT NULL DEFAULT 0,
+        Technician_Paid TINYINT(1) NOT NULL DEFAULT 0,
         Created_At TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         Updated_At TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         CONSTRAINT fk_booking_workflow_booking FOREIGN KEY (Booking_ID) REFERENCES booking(Booking_ID) ON DELETE CASCADE,
@@ -16,6 +18,9 @@ function ensureBookingWorkflowTable(mysqli $conn): void
         UNIQUE KEY uniq_booking (Booking_ID)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     $conn->query($sql);
+
+    $conn->query("ALTER TABLE booking_workflow ADD COLUMN IF NOT EXISTS Payment_Recorded TINYINT(1) NOT NULL DEFAULT 0");
+    $conn->query("ALTER TABLE booking_workflow ADD COLUMN IF NOT EXISTS Technician_Paid TINYINT(1) NOT NULL DEFAULT 0");
 }
 
 function resetBookingToPending(mysqli $conn, int $bookingId): bool
@@ -40,7 +45,7 @@ function resetBookingToPending(mysqli $conn, int $bookingId): bool
 function initializeBookingWorkflow(mysqli $conn, int $bookingId, int $technicianId): void
 {
     ensureBookingWorkflowTable($conn);
-    $stmt = $conn->prepare("INSERT INTO booking_workflow (Booking_ID, Technician_ID) VALUES (?, ?) ON DUPLICATE KEY UPDATE Technician_ID = VALUES(Technician_ID), Technician_Accepted = 0, Client_Confirmed = 0, Technician_Confirmed = 0");
+    $stmt = $conn->prepare("INSERT INTO booking_workflow (Booking_ID, Technician_ID) VALUES (?, ?) ON DUPLICATE KEY UPDATE Technician_ID = VALUES(Technician_ID), Technician_Accepted = 0, Client_Confirmed = 0, Technician_Confirmed = 0, Payment_Recorded = 0, Technician_Paid = 0");
     if ($stmt) {
         $stmt->bind_param('ii', $bookingId, $technicianId);
         $stmt->execute();
@@ -62,7 +67,7 @@ function removeBookingWorkflow(mysqli $conn, int $bookingId): void
 function getBookingWorkflow(mysqli $conn, int $bookingId): ?array
 {
     ensureBookingWorkflowTable($conn);
-    $stmt = $conn->prepare("SELECT Booking_ID, Technician_ID, Technician_Accepted, Client_Confirmed, Technician_Confirmed FROM booking_workflow WHERE Booking_ID = ? LIMIT 1");
+    $stmt = $conn->prepare("SELECT Booking_ID, Technician_ID, Technician_Accepted, Client_Confirmed, Technician_Confirmed, Payment_Recorded, Technician_Paid FROM booking_workflow WHERE Booking_ID = ? LIMIT 1");
     if (!$stmt) {
         return null;
     }
@@ -111,21 +116,26 @@ function markBookingConfirmation(mysqli $conn, int $bookingId, string $actor): a
         return ['success' => false, 'completed' => false, 'message' => 'Invalid actor.'];
     }
 
-    if ((int)$workflow[$field] === 1) {
-        return ['success' => true, 'completed' => ((int)$workflow['Client_Confirmed'] === 1 && (int)$workflow['Technician_Confirmed'] === 1)];
+    if ((int)$workflow[$field] !== 1) {
+        $stmt = $conn->prepare("UPDATE booking_workflow SET {$field} = 1 WHERE Booking_ID = ? LIMIT 1");
+        if (!$stmt) {
+            return ['success' => false, 'completed' => false, 'message' => 'Could not update confirmation.'];
+        }
+        $stmt->bind_param('i', $bookingId);
+        $stmt->execute();
+        $stmt->close();
     }
-
-    $stmt = $conn->prepare("UPDATE booking_workflow SET {$field} = 1 WHERE Booking_ID = ? LIMIT 1");
-    if (!$stmt) {
-        return ['success' => false, 'completed' => false, 'message' => 'Could not update confirmation.'];
-    }
-    $stmt->bind_param('i', $bookingId);
-    $stmt->execute();
-    $stmt->close();
 
     $updated = getBookingWorkflow($conn, $bookingId);
-    $completed = $updated && (int)$updated['Client_Confirmed'] === 1 && (int)$updated['Technician_Confirmed'] === 1;
+    if (!$updated) {
+        return ['success' => false, 'completed' => false, 'message' => 'Unable to load workflow state.'];
+    }
 
+    $completed = (int)$updated['Client_Confirmed'] === 1 && (int)$updated['Technician_Confirmed'] === 1;
+    $paymentRecorded = (int)$updated['Payment_Recorded'] === 1;
+    $technicianPaid = (int)$updated['Technician_Paid'] === 1;
+
+    $currentStatus = null;
     $statusStmt = $conn->prepare("SELECT Status FROM booking WHERE Booking_ID = ? LIMIT 1");
     if ($statusStmt) {
         $statusStmt->bind_param('i', $bookingId);
@@ -134,25 +144,133 @@ function markBookingConfirmation(mysqli $conn, int $bookingId, string $actor): a
         $statusAssoc = $statusResult ? $statusResult->fetch_assoc() : null;
         $currentStatus = $statusAssoc['Status'] ?? null;
         $statusStmt->close();
+    }
 
-        if ($completed) {
-            $updateStatus = $conn->prepare("UPDATE booking SET Status = 'completed' WHERE Booking_ID = ? LIMIT 1");
-            if ($updateStatus) {
-                $updateStatus->bind_param('i', $bookingId);
-                $updateStatus->execute();
-                $updateStatus->close();
-            }
-        } elseif ($currentStatus && $currentStatus !== 'awaiting_confirmation') {
-            $updateStatus = $conn->prepare("UPDATE booking SET Status = 'awaiting_confirmation' WHERE Booking_ID = ? LIMIT 1");
-            if ($updateStatus) {
-                $updateStatus->bind_param('i', $bookingId);
-                $updateStatus->execute();
-                $updateStatus->close();
-            }
+    $targetStatus = null;
+    if ($completed) {
+        if ($technicianPaid) {
+            $targetStatus = 'completed';
+        } elseif ($paymentRecorded) {
+            $targetStatus = 'awaiting_payout';
+        } else {
+            $targetStatus = 'awaiting_payment';
+        }
+    } else {
+        if (!$currentStatus || !in_array($currentStatus, ['awaiting_confirmation', 'awaiting_payment', 'awaiting_payout'], true)) {
+            $targetStatus = 'awaiting_confirmation';
         }
     }
 
-    return ['success' => true, 'completed' => $completed];
+    if ($targetStatus && $targetStatus !== $currentStatus) {
+        $updateStatus = $conn->prepare("UPDATE booking SET Status = ? WHERE Booking_ID = ? LIMIT 1");
+        if ($updateStatus) {
+            $updateStatus->bind_param('si', $targetStatus, $bookingId);
+            $updateStatus->execute();
+            $updateStatus->close();
+        }
+    }
+
+    return [
+        'success' => true,
+        'completed' => $completed,
+        'status' => $targetStatus ?? $currentStatus,
+        'payment_recorded' => $paymentRecorded,
+        'technician_paid' => $technicianPaid
+    ];
+}
+
+function markWorkflowPaymentRecorded(mysqli $conn, int $bookingId): bool
+{
+    ensureBookingWorkflowTable($conn);
+    $workflow = getBookingWorkflow($conn, $bookingId);
+    if (!$workflow) {
+        return false;
+    }
+
+    if ((int)$workflow['Payment_Recorded'] !== 1) {
+        $stmt = $conn->prepare("UPDATE booking_workflow SET Payment_Recorded = 1 WHERE Booking_ID = ? LIMIT 1");
+        if (!$stmt) {
+            return false;
+        }
+        $stmt->bind_param('i', $bookingId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    $updated = getBookingWorkflow($conn, $bookingId);
+    if (!$updated) {
+        return false;
+    }
+
+    $targetStatus = (int)$updated['Technician_Paid'] === 1 ? 'completed' : 'awaiting_payout';
+
+    $updateStatus = $conn->prepare("UPDATE booking SET Status = ? WHERE Booking_ID = ? LIMIT 1");
+    if ($updateStatus) {
+        $updateStatus->bind_param('si', $targetStatus, $bookingId);
+        $updateStatus->execute();
+        $updateStatus->close();
+    }
+
+    return true;
+}
+
+function markTechnicianPaymentAcknowledgement(mysqli $conn, int $bookingId, int $technicianId): array
+{
+    ensureBookingWorkflowTable($conn);
+
+    $assignmentStmt = $conn->prepare("SELECT Technician_ID FROM booking WHERE Booking_ID = ? LIMIT 1");
+    if (!$assignmentStmt) {
+        return ['success' => false, 'message' => 'Unable to verify booking ownership.'];
+    }
+    $assignmentStmt->bind_param('i', $bookingId);
+    $assignmentStmt->execute();
+    $assignmentStmt->bind_result($assignedTechnicianId);
+    if (!$assignmentStmt->fetch()) {
+        $assignmentStmt->close();
+        return ['success' => false, 'message' => 'Booking not found.'];
+    }
+    $assignmentStmt->close();
+
+    if ((int)$assignedTechnicianId !== $technicianId) {
+        return ['success' => false, 'message' => 'You are not assigned to this booking.'];
+    }
+
+    $workflow = getBookingWorkflow($conn, $bookingId);
+    if (!$workflow) {
+        return ['success' => false, 'message' => 'Workflow record missing.'];
+    }
+
+    if ((int)$workflow['Payment_Recorded'] !== 1) {
+        return ['success' => false, 'message' => 'Client payment has not been recorded yet.'];
+    }
+
+    if ((int)$workflow['Technician_Paid'] === 1) {
+        return ['success' => true, 'status' => 'completed', 'message' => 'Payment already acknowledged.'];
+    }
+
+    $updateStmt = $conn->prepare("UPDATE booking_workflow SET Technician_Paid = 1 WHERE Booking_ID = ? LIMIT 1");
+    if (!$updateStmt) {
+        return ['success' => false, 'message' => 'Unable to update payment acknowledgement.'];
+    }
+    $updateStmt->bind_param('i', $bookingId);
+    $updateStmt->execute();
+    $updateStmt->close();
+
+    $paymentUpdate = $conn->prepare("UPDATE job_payments SET Status = 'paid' WHERE Booking_ID = ?");
+    if ($paymentUpdate) {
+        $paymentUpdate->bind_param('i', $bookingId);
+        $paymentUpdate->execute();
+        $paymentUpdate->close();
+    }
+
+    $statusUpdate = $conn->prepare("UPDATE booking SET Status = 'completed' WHERE Booking_ID = ? LIMIT 1");
+    if ($statusUpdate) {
+        $statusUpdate->bind_param('i', $bookingId);
+        $statusUpdate->execute();
+        $statusUpdate->close();
+    }
+
+    return ['success' => true, 'status' => 'completed', 'message' => 'Payment acknowledged. Booking closed.'];
 }
 
 function doesTechnicianCoverLocation(?string $coverage, ?string $city, ?string $province, ?string $barangay = ''): bool

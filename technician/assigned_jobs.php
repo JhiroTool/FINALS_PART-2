@@ -86,10 +86,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['booking_id'], $_POST['
             case 'complete':
                 $result = markBookingConfirmation($conn, $booking_id, 'technician');
                 if ($result['success']) {
-                    $message = $result['completed'] ? "Job completed!" : "Marked complete. Awaiting client confirmation.";
+                    $statusAfter = $result['status'] ?? '';
+                    if ($result['completed'] && $statusAfter === 'completed') {
+                        $message = "Job completed!";
+                    } elseif ($statusAfter === 'awaiting_payment') {
+                        $message = "Both sides confirmed. Waiting for the client to settle payment.";
+                    } elseif ($statusAfter === 'awaiting_payout') {
+                        $message = "Client reported payment. Confirm once you receive it.";
+                    } else {
+                        $message = "Marked complete. Awaiting client confirmation.";
+                    }
                     $messageType = "success";
                 } else {
                     $message = $result['message'] ?? "Unable to confirm completion.";
+                    $messageType = "error";
+                }
+                break;
+            case 'ack_payment':
+                $result = markTechnicianPaymentAcknowledgement($conn, $booking_id, $user_id);
+                if ($result['success']) {
+                    $message = $result['message'] ?? "Payment acknowledged. Booking closed.";
+                    $messageType = "success";
+                } else {
+                    $message = $result['message'] ?? "Unable to acknowledge payment.";
                     $messageType = "error";
                 }
                 break;
@@ -188,6 +207,18 @@ $tech_stmt->close();
                     'class' => 'awaiting-confirmation',
                     'description' => 'Waiting for the client to confirm completion'
                 ],
+                'awaiting_payment' => [
+                    'title' => 'Awaiting Client Payment',
+                    'icon' => '💳',
+                    'class' => 'awaiting-confirmation',
+                    'description' => 'Client needs to settle payment before final approval'
+                ],
+                'awaiting_payout' => [
+                    'title' => 'Confirm Payment Received',
+                    'icon' => '💼',
+                    'class' => 'awaiting-confirmation',
+                    'description' => 'Client recorded a payment. Confirm receipt to close the job'
+                ],
                 'completed' => [
                     'title' => 'Completed Work',
                     'icon' => '✅',
@@ -200,11 +231,14 @@ $tech_stmt->close();
                 try {
                     $jobs_query = "
                         SELECT b.*, c.Client_FN, c.Client_LN, c.Client_Phone, c.Client_Email,
-                               a.Street, a.Barangay, a.City, a.Province
+                               a.Street, a.Barangay, a.City, a.Province,
+                               jp.JobPayment_ID, jp.Amount AS Payment_Amount, jp.Method AS Payment_Method,
+                               jp.Status AS Payment_Status, jp.Confirmed_At AS Payment_Confirmed_At, jp.Notes AS Payment_Notes
                         FROM booking b 
                         LEFT JOIN client c ON b.Client_ID = c.Client_ID 
                         LEFT JOIN client_address ca ON c.Client_ID = ca.Client_ID
                         LEFT JOIN address a ON ca.Address_ID = a.Address_ID
+                        LEFT JOIN job_payments jp ON jp.Booking_ID = b.Booking_ID
                         WHERE b.Technician_ID = ? AND b.Status = ?
                         ORDER BY b.AptDate ASC
                     ";
@@ -247,11 +281,16 @@ $tech_stmt->close();
                                                 <div class="job-status-tag <?php echo $status; ?>">
                                                     <?php 
                                                     $status_icons = [
-                                                        'assigned' => '🆕',
+                                                        'awaiting_acceptance' => '🆕',
+                                                        'assigned' => '📌',
                                                         'in_progress' => '⚡',
+                                                        'awaiting_confirmation' => '📝',
+                                                        'awaiting_payment' => '💳',
+                                                        'awaiting_payout' => '💼',
                                                         'completed' => '✅'
                                                     ];
-                                                    echo $status_icons[$status] . ' ' . ucfirst(str_replace('_', ' ', $status));
+                                                    $icon = $status_icons[$status] ?? 'ℹ️';
+                                                    echo $icon . ' ' . ucfirst(str_replace('_', ' ', $status));
                                                     ?>
                                                 </div>
                                             </div>
@@ -287,7 +326,18 @@ $tech_stmt->close();
                                                     ?>
                                                 </span>
                                             </div>
-                                            
+
+                                            <?php if (!empty($job['Payment_Amount'])): ?>
+                                                <div class="info-row">
+                                                    <span class="info-label">💳 Payment:</span>
+                                                    <span class="info-value">
+                                                        ₱<?php echo number_format((float)$job['Payment_Amount'], 2); ?>
+                                                        via <?php echo htmlspecialchars(ucfirst($job['Payment_Method'] ?? '')); ?>
+                                                        (<?php echo htmlspecialchars(ucfirst($job['Payment_Status'] ?? 'pending')); ?>)
+                                                    </span>
+                                                </div>
+                                            <?php endif; ?>
+
                                             <?php if (!empty($job['Description'])): ?>
                                                 <div class="info-row">
                                                     <span class="info-label">📝 Notes:</span>
@@ -327,6 +377,19 @@ $tech_stmt->close();
                                                 </form>
                                             <?php elseif ($status === 'awaiting_confirmation'): ?>
                                                 <div class="btn btn-secondary" style="cursor: default;">⏳ Waiting for client confirmation</div>
+                                            <?php elseif ($status === 'awaiting_payment'): ?>
+                                                <div class="btn btn-secondary" style="cursor: default;">💳 Awaiting client payment</div>
+                                            <?php elseif ($status === 'awaiting_payout'): ?>
+                                                <?php if (!empty($job['Payment_Amount'])): ?>
+                                                    <div class="btn btn-secondary" style="cursor: default;">
+                                                        💳 ₱<?php echo number_format((float)$job['Payment_Amount'], 2); ?> via <?php echo htmlspecialchars(ucfirst($job['Payment_Method'] ?? '')); ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                                <form method="POST">
+                                                    <input type="hidden" name="booking_id" value="<?php echo $job['Booking_ID']; ?>">
+                                                    <input type="hidden" name="action" value="ack_payment">
+                                                    <button type="submit" class="btn btn-success">💼 Confirm Payment Received</button>
+                                                </form>
                                             <?php endif; ?>
 
                                             <a href="tel:<?php echo $job['Client_Phone']; ?>" class="btn btn-secondary">

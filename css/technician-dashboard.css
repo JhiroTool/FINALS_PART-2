@@ -175,6 +175,14 @@
     line-height: 1;
 }
 
+.modern-header .user-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
 .user-dropdown {
     position: relative;
 }
@@ -213,6 +221,101 @@
     opacity: 1;
     visibility: visible;
     transform: translateY(0);
+}
+
+.dropdown-menu .dropdown-subscription {
+    margin: 0.75rem;
+    margin-bottom: 0.25rem;
+    padding: 0.85rem 1rem;
+    border-radius: 16px;
+    border: 1px solid rgba(226, 232, 240, 0.7);
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    background: var(--gray-50);
+}
+
+.dropdown-menu .dropdown-subscription.active {
+    background: linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(209, 250, 229, 0.9));
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.dropdown-menu .dropdown-subscription.standard {
+    background: linear-gradient(135deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.9));
+}
+
+.dropdown-menu .dropdown-subscription .subscription-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: var(--white);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    color: var(--gray-700);
+    width: fit-content;
+}
+
+.dropdown-menu .dropdown-subscription .subscription-chip .chip-label {
+    color: var(--gray-800);
+}
+
+.dropdown-menu .dropdown-subscription .subscription-chip .chip-value {
+    color: var(--gray-500);
+    font-weight: 500;
+}
+
+.dropdown-menu .dropdown-subscription .subscription-chip .chip-separator {
+    color: var(--gray-400);
+}
+
+.dropdown-menu .dropdown-subscription .subscription-hint {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+    margin: 0;
+    line-height: 1.4;
+}
+
+.dropdown-menu .payment-instructions {
+    margin: 0.5rem 0 0;
+    padding: 0.75rem;
+    border-radius: 12px;
+    border: 1px dashed rgba(148, 163, 184, 0.45);
+    background: rgba(248, 250, 252, 0.85);
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    text-align: center;
+}
+
+.dropdown-menu .payment-instructions strong {
+    color: var(--gray-700);
+    font-size: 0.8rem;
+}
+
+.dropdown-menu .payment-instructions .payment-contact {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+.dropdown-menu .payment-instructions .qr-wrapper {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: white;
+}
+
+.dropdown-menu .payment-instructions .qr-wrapper img {
+    display: block;
+    width: 100%;
+    max-width: 120px;
+    margin: 0 auto;
 }
 
 .dropdown-menu a {
@@ -269,5 +372,10 @@ main {
     
     .brand-text span {
         display: none;
+    }
+    
+    .modern-header .user-info .subscription-chip-group {
+        width: 100%;
+        justify-content: flex-start;
     }
 }
