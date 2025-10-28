@@ -1283,6 +1283,39 @@ body {
         flex-direction: column;
         text-align: center;
     }
+
+    .subscription-card {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: left;
+        gap: 1.25rem;
+    }
+
+    .subscription-info,
+    .subscription-actions {
+        width: 100%;
+    }
+
+    .subscription-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .subscription-success,
+    .subscription-pending {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .subscription-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .payment-hint {
+        text-align: left;
+    }
 }
 
 @media (max-width: 480px) {
